@@ -187,10 +187,16 @@ function generatePermalink(frontMatter, slug, date, config = {}) {
     pattern = presets[pattern];
   }
 
+  // FIX (timezone-dependent permalinks): `new Date("2026-06-20")` is UTC
+  // midnight, but getFullYear()/getMonth()/getDate() read in the HOST's
+  // local timezone -- on any machine behind UTC the permalink came out a
+  // day early ("/2026/06/19/" instead of "/2026/06/20/"). UTC getters
+  // preserve the calendar date the author wrote, on every host, matching
+  // the timezoneOffset: 0 date-filter rendering above.
   const parsedDate = isNaN(Date.parse(date)) ? new Date() : new Date(date);
-  const year = parsedDate.getFullYear();
-  const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
-  const day = String(parsedDate.getDate()).padStart(2, '0');
+  const year = parsedDate.getUTCFullYear();
+  const month = String(parsedDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(parsedDate.getUTCDate()).padStart(2, '0');
 
   // FIX (#4 in review -- :title permalink placeholder precedence):
   // Jekyll's docs define `:title` as "the slugified title from the
@@ -377,6 +383,21 @@ export class JekyllEngine {
       dynamicPartials: false,
       jekyllInclude: true,
       jekyllWhere: true,
+      // FIX (timezone-dependent dates): LiquidJS's date filters
+      // (date, date_to_string, date_to_xmlschema, date_to_rfc822,
+      // date_to_long_string) format in the HOST's local timezone by
+      // default. A date-only value like "2026-06-20" parses to UTC
+      // midnight, so on any machine behind UTC (e.g. EDT) every date
+      // rendered a day early -- permalinks, <time datetime>, and
+      // "20 Jun 2026" strings all shifted. Real Jekyll treats date-only
+      // values as timezone-naive (Ruby Date has no time component), and
+      // the battle-test ground truth was built in UTC. Pinning
+      // timezoneOffset to 0 makes every date filter render in UTC, so
+      // the calendar date the author wrote is preserved on every host.
+      // Deliberate, documented divergence: a datetime WITH an explicit
+      // offset renders in UTC rather than Ruby's system-local time --
+      // deterministic beats host-dependent.
+      timezoneOffset: 0,
       relativeReference: false, // not needed for this flat VFS; avoids a console warning
       fs: {
         resolve: (root, file, ext) => {
