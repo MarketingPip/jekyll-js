@@ -1,6 +1,6 @@
 # Roadmap
 
-Current state: **114/114 tests passing.** Battle-tested against the real `minima` theme. Every page-title is byte-for-byte identical to real Jekyll. The only structural HTML gap vs real Jekyll is the JSON-LD `<script>` block.
+Current state: **135/135 tests passing** (verified under `TZ=America/Toronto`, `TZ=UTC`, and `TZ=Pacific/Auckland`). Battle-tested against the real `minima` theme. Every page-title is byte-for-byte identical to real Jekyll. The only structural HTML gap vs real Jekyll is the JSON-LD `<script>` block.
 
 Items are in rough priority order — highest value / lowest effort first.
 

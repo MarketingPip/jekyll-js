@@ -2,7 +2,7 @@
 
 A JavaScript Jekyll engine that renders real Jekyll sites in-process — no Ruby, no file system, no spawned processes. Pass it a virtual file system (VFS) of your site's source files as a plain JS object; get back an array of rendered pages.
 
-Battle-tested against Jekyll 4.3.2 + the real `minima` theme. **114 tests, all passing.** Structural HTML diff vs real Jekyll ground truth: every tag matches on every page except `<script type="application/ld+json">` (documented).
+Battle-tested against Jekyll 4.3.2 + the real `minima` theme. **135 tests, all passing** (in every timezone). Structural HTML diff vs real Jekyll ground truth: every tag matches on every page except `<script type="application/ld+json">` (documented).
 
 ```
 npm install && npm test
@@ -279,7 +279,7 @@ const engine = new JekyllEngine({
 
 ## SCSS / Sass pipeline
 
-Any file in `assets/` whose name ends in `.scss` or `.sass` and whose content starts with `---` is compiled through Dart Sass. `@import` paths resolve against your `_sass/` VFS entries including nested partials (`minima.scss` → `minima/_base.scss`, etc.). Output is added to `build()` results with a `.css` permalink.
+Any `.scss`/`.sass` file **outside `_sass/`** whose content starts with `---` front matter is compiled through Dart Sass (like real Jekyll -- not just `assets/`). `@import` paths resolve against your `_sass/` VFS entries including nested partials (`minima.scss` → `minima/_base.scss`, etc.). Output is added to `build()` results with a mirrored `.css` permalink (`css/main.scss` → `/css/main.css`).
 
 ```
 // _config.yml
@@ -303,6 +303,7 @@ test/
   integration.test.js        Full build against the defaultVFS fixture
   jekyll-parity-2.test.js    site.static_files, related_posts, html_pages, excerpt_separator, pagination
   battletest.test.js         Real minima theme, diffed against jekyll build ground truth
+  parity-fixes-2.test.js     Round-2 parity fixes: timezone audit + 9 more issues
 
 battletest/
   minima-theme/              Real minima 2.5.1 gem files (portable, no system Ruby needed)
@@ -345,7 +346,7 @@ ROADMAP.md         Planned features and known gaps
 
 ```bash
 npm install
-npm test                          # all 114 tests
+npm test                          # all 135 tests
 node battletest/build-vfs.mjs     # regenerate the minima VFS (after editing theme/site files)
 node battletest/run-engine.mjs    # regenerate engine-out.json for manual diffing
 ```

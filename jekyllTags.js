@@ -19,6 +19,7 @@
  */
 
 import hljs from 'highlight.js';
+import { TokenKind } from 'liquidjs';
 
 // ─── highlight tag ──────────────────────────────────────────────────────────
 // Mirrors Jekyll::Tags::HighlightBlock output format exactly:
@@ -44,7 +45,11 @@ function registerHighlightTag(engine) {
       let closed = false;
       while (remainTokens.length) {
         const token = remainTokens.shift();
-        if (token.constructor.name === 'TagToken' && token.name === 'endhighlight') {
+        // FIX (minification fragility): the old check used
+        // token.constructor.name === 'TagToken', which breaks under
+        // minified LiquidJS builds (the browser path this engine
+        // documents). TokenKind.Tag is minification-safe.
+        if (token.kind === TokenKind.Tag && token.name === 'endhighlight') {
           closed = true;
           break;
         }
@@ -72,7 +77,21 @@ function registerHighlightTag(engine) {
       }
 
       const langClass = `language-${this.lang}`;
-      const inner = `<code class="${langClass}" data-lang="${this.lang}">${highlighted}</code>`;
+      let inner;
+      if (this.linenos) {
+        // FIX (linenos parsed but ignored): mirror Rouge's linenos table
+        // shape so themes' syntax stylesheets actually apply.
+        const lineCount = highlighted.split('\n').length;
+        const numbers = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n');
+        inner =
+          `<code class="${langClass}" data-lang="${this.lang}">` +
+          `<table class="rouge-table"><tbody><tr>` +
+          `<td class="rouge-gutter gl"><pre class="lineno">${numbers}</pre></td>` +
+          `<td class="rouge-code"><pre>${highlighted}</pre></td>` +
+          `</tr></tbody></table></code>`;
+      } else {
+        inner = `<code class="${langClass}" data-lang="${this.lang}">${highlighted}</code>`;
+      }
       const pre = `<pre>${inner}</pre>`;
       return `<figure class="highlight">${pre}</figure>`;
     },
@@ -102,8 +121,13 @@ function registerLinkTag(engine) {
         (p) => p.path === this.target || p.url === this.target || p.path === `/${this.target}`
       );
       if (found) return found.url || found.path || this.target;
-      // Fallback: treat as a literal relative URL
-      return `/${this.target.replace(/^\//, '')}`;
+      // FIX (silent wrong URL): real Jekyll raises
+      // "Could not find document 'x' in tag 'link'" and fails the build.
+      // Returning a plausible-but-wrong URL hides broken links; loud wins.
+      throw new Error(
+        `Could not find document '${this.target}' in tag 'link'. ` +
+          `Make sure the document exists and the path is correct.`
+      );
     },
   });
 }
@@ -125,8 +149,10 @@ function registerPostUrlTag(engine) {
         return base === this.slug || base.replace(/^\d{4}-\d{2}-\d{2}-/, '') === this.slug;
       });
       if (found) return found.url;
-      // Fallback: raise a Liquid-style error string (mirrors Jekyll's behaviour)
-      return `[post_url: could not find post "${this.slug}"]`;
+      // FIX (silent wrong output): real Jekyll raises
+      // 'Could not find post "x" in tag 'post_url'' and fails the build,
+      // instead of emitting a literal error string into the page.
+      throw new Error(`Could not find post "${this.slug}" in tag 'post_url'.`);
     },
   });
 }

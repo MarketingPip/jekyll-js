@@ -25,10 +25,15 @@ import * as sass from 'sass';
  * are compiled only when imported, not directly.
  */
 export function isSassAsset(path, content) {
-  if (!path.startsWith('assets/') && !path.startsWith('/assets/')) return false;
+  // FIX (assets/-only scoping): real Jekyll compiles ANY .scss/.sass file
+  // carrying front matter (e.g. css/main.scss), not just ones under
+  // assets/. _sass/ contents are never entry points (Jekyll treats the
+  // whole directory as partials land), and leading-underscore files are
+  // Sass partials, compiled only when imported.
   if (!/\.(scss|sass)$/i.test(path)) return false;
   const name = path.split('/').pop();
   if (name.startsWith('_')) return false; // partial, not a root
+  if (path === '_sass' || path.startsWith('_sass/') || path.includes('/_sass/')) return false;
   // Jekyll requires front matter for asset files to be processed
   return content.startsWith('---');
 }
@@ -114,10 +119,12 @@ export function compileSassAsset(path, content, vfs, config = {}) {
       logger: sass.Logger.silent,
     });
   } catch (err) {
-    // Return a CSS comment with the error rather than crashing the whole build
+    // Return a CSS comment with the error rather than crashing the whole build.
+    // The `error` field lets callers (build()) also surface it via the logger.
     return {
       css: `/* Sass compile error: ${err.message.replace(/\*\//g, '* /')} */`,
       permalink: sassToCssPermalink(path),
+      error: err.message,
     };
   }
 

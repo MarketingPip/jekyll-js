@@ -12,7 +12,7 @@
 // how the packages were loaded.
 // -------------------------------------------------------------
 import { Liquid } from 'liquidjs';
-import { marked } from 'marked';
+import { Marked, Renderer } from 'marked';
 import * as yaml from 'js-yaml';
 import fm from 'front-matter';
 import { registerJekyllExtensions } from './jekyllTags.js';
@@ -98,10 +98,18 @@ function stripIndex(input) {
 // highlighter-rouge` + `<figure class="highlight">` wrapper kramdown/Rouge
 // use, mirroring the {% highlight %} tag's own output shape for visual
 // consistency (see jekyllTags.js).
-const markedRenderer = new marked.Renderer();
+// FIX (global marked mutation): the custom renderer used to be installed
+// with marked.setOptions(), mutating the shared global instance -- any
+// other code in the host process using `marked` would silently inherit
+// Jekyll's renderer. The engine now owns a scoped Marked instance and the
+// global is left untouched.
+const markedRenderer = new Renderer();
 markedRenderer.codespan = (token) => {
   const text = typeof token === 'object' ? token.text : token;
-  return `<code class="language-plaintext highlighter-rouge">${text}</code>`;
+  // FIX (codespan HTML escaping): kramdown escapes HTML inside inline code.
+  // The old renderer emitted it raw, so `<b>` inside backticks rendered as
+  // a real element -- an XSS vector when rendering untrusted Markdown.
+  return `<code class="language-plaintext highlighter-rouge">${escapeHtmlForMarkdown(text)}</code>`;
 };
 markedRenderer.code = (token) => {
   const { text, lang } = typeof token === 'object' ? token : { text: token, lang: undefined };
@@ -110,14 +118,14 @@ markedRenderer.code = (token) => {
     text
   )}</code></pre></figure>`;
 };
-marked.setOptions({ renderer: markedRenderer });
+const mdParser = new Marked({ renderer: markedRenderer });
 
 function escapeHtmlForMarkdown(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function parseMarkdown(md) {
-  return marked.parse(String(md));
+  return mdParser.parse(String(md));
 }
 
 // Resolves and normalizes categories following Jekyll standards
@@ -437,19 +445,22 @@ export class JekyllEngine {
   }
 
   _resolveVfsPath(file) {
+    // FIX (include/layout precedence): Jekyll's {% include %} searches ONLY
+    // _includes/, so _includes/ must win over _layouts/ here. The old order
+    // let a layout file shadow an include of the same name.
     let cleaned = file.replace(/^\//, '');
     if (this.vfsTemplates[cleaned] !== undefined) {
       return cleaned;
     }
 
-    const layoutPath = `_layouts/${cleaned}`;
-    if (this.vfsTemplates[layoutPath] !== undefined) {
-      return layoutPath;
-    }
-
     const includePath = `_includes/${cleaned}`;
     if (this.vfsTemplates[includePath] !== undefined) {
       return includePath;
+    }
+
+    const layoutPath = `_layouts/${cleaned}`;
+    if (this.vfsTemplates[layoutPath] !== undefined) {
+      return layoutPath;
     }
 
     return cleaned;
@@ -507,7 +518,14 @@ export class JekyllEngine {
       if (path === '_config.yml' || path === '_config.yaml') {
         try {
           this._config = yaml.load(content) || {};
-        } catch (e) {}
+        } catch (e) {
+          // FIX (silent swallowing): a typo'd _config.yml used to build
+          // "successfully" with an empty config and no hint why.
+          this.options.logger(
+            `_config.yml: YAML parse error (${e.message}) -- using empty config`,
+            'warn'
+          );
+        }
         break;
       }
     }
@@ -531,7 +549,11 @@ export class JekyllEngine {
         try {
           const name = path.replace('_data/', '').replace(/\.[^/.]+$/, '');
           this._data[name] = yaml.load(content);
-        } catch (e) {}
+        } catch (e) {
+          // FIX (silent swallowing): a broken _data file used to vanish
+          // without a trace, leaving site.data.name undefined.
+          this.options.logger(`_data/${path.slice('_data/'.length)}: YAML parse error (${e.message}) -- skipped`, 'warn');
+        }
         continue;
       }
 
@@ -551,7 +573,22 @@ export class JekyllEngine {
           attributes.categories = postCategories;
           attributes.tags = postTags;
 
-          const permalink = generatePermalink(attributes, parsed?.slug, parsed?.date, this._config);
+          // FIX (excerpt_separator was hardcoded): front matter wins
+          // over site config, which wins over Jekyll's own default of
+          // "\n\n" -- mirrors Document#excerpt_separator exactly.
+          const excerptSeparator =
+            attributes.excerpt_separator || this._config.excerpt_separator || '\n\n';
+          // FIX (front-matter date ignored in permalinks): real Jekyll lets
+          // `date:` in front matter override the filename date everywhere,
+          // including the :year/:month/:day placeholders. Passing only the
+          // filename date made site.posts[].date (front-matter wins)
+          // disagree with site.posts[].url (filename always won).
+          const permalink = generatePermalink(
+            attributes,
+            parsed?.slug,
+            attributes.date || parsed?.date,
+            this._config
+          );
           this._collections.posts ||= [];
           this._collections.posts.push({
             path,
@@ -563,12 +600,18 @@ export class JekyllEngine {
             _permalink: permalink,
             _date: attributes.date || parsed?.date,
             _slug: parsed?.slug,
-            // FIX (excerpt_separator was hardcoded): front matter wins
-            // over site config, which wins over Jekyll's own default of
-            // "\n\n" -- mirrors Document#excerpt_separator exactly.
-            _excerptSeparator: attributes.excerpt_separator || this._config.excerpt_separator || '\n\n',
+            _excerptSeparator: excerptSeparator,
+            // FIX (page.excerpt empty on post pages): compute the excerpt
+            // once at scan time so both site.posts entries AND the post's
+            // own page context share it (a front-matter `excerpt:` still
+            // wins -- see _buildSiteContext/_renderPage).
+            _excerpt: parseMarkdown(extractExcerpt(body, excerptSeparator)),
           });
-        } catch (e) {}
+        } catch (e) {
+          // FIX (silent swallowing): a post with broken front matter used
+          // to vanish from the build with no hint why.
+          this.options.logger(`Skipping ${path}: front-matter parse error (${e.message})`, 'warn');
+        }
         continue;
       }
 
@@ -602,7 +645,10 @@ export class JekyllEngine {
             _permalink: permalink,
             _relPath: relPath,
           });
-        } catch (e) {}
+        } catch (e) {
+          // FIX (silent swallowing): see the post branch above.
+          this.options.logger(`Skipping ${path}: front-matter parse error (${e.message})`, 'warn');
+        }
         continue;
       }
 
@@ -689,7 +735,7 @@ export class JekyllEngine {
     // front matter on a post. Now we spread everything through and only
     // override the handful of computed fields.
     const posts = (this._collections.posts || []).map((p) => {
-      const { _body, _permalink, _date, _slug, _excerptSeparator, content: _rawContent, ...rest } = p;
+      const { _body, _permalink, _date, _slug, _excerptSeparator, _excerpt, content: _rawContent, ...rest } = p;
       return {
         ...rest,
         url: _permalink,
@@ -699,8 +745,9 @@ export class JekyllEngine {
         // override (now living in `rest.excerpt`) is respected first.
         // FIX: excerpt now respects a configurable excerpt_separator
         // (front matter > site config > Jekyll's own "\n\n" default)
-        // instead of always splitting on a blank line.
-        excerpt: rest.excerpt || (_body ? parseMarkdown(extractExcerpt(_body, _excerptSeparator)) : ''),
+        // instead of always splitting on a blank line. The excerpt itself
+        // is precomputed at scan time (_excerpt) so post pages share it.
+        excerpt: rest.excerpt || _excerpt || '',
         content: _body,
       };
     });
@@ -836,12 +883,24 @@ export class JekyllEngine {
       }
     }
 
+    // FIX (page.date/page.excerpt empty on post pages): real Jekyll's
+    // DocumentDrop exposes the computed date and excerpt on the post's own
+    // page, not just in site.posts. Merge the scan-time computed values
+    // (front-matter overrides still win).
+    const postFields =
+      isPost && postMeta
+        ? {
+            date: postMeta._date,
+            excerpt: attributes.excerpt || postMeta._excerpt || '',
+          }
+        : {};
     const pageCtx = {
       ...siteCtx,
       page: {
         ...attributes,
         path,
         url: localPermalink,
+        ...postFields,
       },
       // FIX (jekyll.environment was never injected): minima and many other
       // themes gate Google Analytics and Disqus behind
@@ -977,6 +1036,12 @@ export class JekyllEngine {
     for (const asset of this._sassAssets) {
       this.options.logger(`Compiling Sass: ${asset.path}`, 'info');
       const compiled = compileSassAsset(asset.path, asset.content, this.vfsTemplates, this._config);
+      // FIX (silent Sass failures): the compile error used to hide inside
+      // a CSS comment. The comment is still emitted (playground-friendly),
+      // but now it also warns loudly so a broken stylesheet can't be missed.
+      if (compiled.error) {
+        this.options.logger(`Sass compile error in ${asset.path}: ${compiled.error}`, 'warn');
+      }
       const cssResult = {
         path: asset.path,
         permalink: compiled.permalink,

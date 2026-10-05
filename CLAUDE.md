@@ -26,7 +26,7 @@ the start of this conversation).
 engine.js           Main file. ~990 lines. Single class: JekyllEngine.
 jekyllTags.js       LiquidJS tag registrations (highlight, link, post_url, seo, feed_meta).
 assetsPipeline.js   Dart Sass SCSS pipeline with VFS-based @import resolution.
-test/               6 test files, 114 tests total, Jest + ESM.
+test/               7 test files, 135 tests total, Jest + ESM.
 battletest/         Real minima 2.5.1 theme, real jekyll new scaffold, real jekyll build
                     ground-truth HTML. Portable (no system Ruby needed to run tests).
 FIXES.md            Every bug fixed, before/after, evidence.
@@ -35,7 +35,7 @@ ROADMAP.md          What's next (see that file).
 README.md           User-facing docs.
 ```
 
-**Run tests:** `npm install && npm test` — no Ruby needed, all 114 tests self-contained.
+**Run tests:** `npm install && npm test` — no Ruby needed, all 135 tests self-contained.
 
 ---
 

@@ -20,7 +20,7 @@ for the exact algorithm where one was needed (`jekyll-seo-tag`'s
 installed gems, not from memory).
 
 `test/battletest.test.js` (38 tests) encodes this whole investigation as a
-permanent regression suite. Full project suite: **114/114 passing.**
+permanent regression suite. Full project suite: **135/135 passing.**
 
 ## Result: structural HTML diff vs real Jekyll
 
@@ -217,7 +217,7 @@ fenced code blocks to match kramdown's class conventions.
 ## Running the battle test yourself
 ```
 npm install
-npm test                                  # full suite, 114 tests
+npm test                                  # full suite, 135 tests
 node battletest/build-vfs.mjs             # regenerate battletest/vfs.json from the live theme+site
 node battletest/run-engine.mjs            # regenerate battletest/engine-out.json
 ```
