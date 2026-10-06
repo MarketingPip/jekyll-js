@@ -63,6 +63,15 @@ function slugify(str) {
     .replace(/^-+|-+$/g, '');
 }
 
+// Jekyll parity (Utils.titleize_slug): "my-example-post" -> "My Example Post".
+// Used as the fallback title when front matter has no `title:`.
+function titleizeSlug(slug) {
+  return String(slug)
+    .split(/[-_\s]+/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
 // -------------------------------------------------------------
 // URL helpers for the relative_url / absolute_url filters.
 //
@@ -922,6 +931,9 @@ export class JekyllEngine {
             path,
             content,
             ...attributes,
+            // FIX (title fallback): Jekyll uses the titleized filename slug
+            // when front matter has no `title:`. Minima's posts rely on this.
+            title: attributes.title || titleizeSlug(parsed?.slug || ''),
             categories: postCategories,
             tags: postTags,
             _body: body,
@@ -1332,6 +1344,9 @@ export class JekyllEngine {
     return {
       site: {
         ...this._config,
+        // FIX (site.time): Jekyll sets site.time to the build time.
+        // Config `time:` overrides (for reproducible builds).
+        time: this._config.time ? new Date(this._config.time) : new Date(),
         data: this._data,
         tags: tagsMap,
         categories: categoriesMap,
