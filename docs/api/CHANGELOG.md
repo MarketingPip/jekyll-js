@@ -11,7 +11,34 @@ below — nothing is deleted, only superseded.
 
 ---
 
-## 0.1.0 (2026-10-05) — current
+## 0.2.0 (2026-10-06) — current
+
+**`exclude:`/`include:` config** (Jekyll parity)
+- `exclude:` in `_config.yml` skips files/dirs (merged with Jekyll's
+  defaults: `Gemfile`, `node_modules/`, `.sass-cache/`, etc.).
+- `include:` forces inclusion, overriding `exclude:`.
+- Infrastructure (`_layouts/`, `_includes/`, `_data/`, `_sass/`,
+  `_config.yml`) is never excluded.
+
+**JS Plugin API** (new)
+- `engine.use(pluginFn)` — register a plugin.
+- `engine.registerHook(owner, event, fn)` / `engine.triggerHook(...)` —
+  mirrors `Jekyll::Hooks` (`'site'/'post_read'`, `'pages'/'post_init'`).
+- `engine.registerGenerator(fn)` — mirrors `Jekyll::Generator`.
+- `engine.registerTag(name, fn)` / `engine.registerFilter(name, fn)`.
+- `engine.createPage({ dir, name, layout, content })` — mirrors `Jekyll::Page`.
+- `engine.fileExists(path)`, `engine.logger`, `engine.utils.slugify`.
+- `site` object for hooks/generators: `config`, `collections` (`{ docs }`
+  with Ruby-like `.data`/`.date`), mutable `pages`, `data`, `source`.
+
+**Fixes**
+- `_computePagination` no longer crashes when `site.posts` is empty and
+  `paginate:` is set.
+- Nested `index.html` permalinks: `a/b/index.html` → `/a/b/` (was `/a/b/index/`).
+
+---
+
+## 0.1.0 (2026-10-05)
 
 Initial documented API.
 

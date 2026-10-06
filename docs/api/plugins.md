@@ -85,3 +85,73 @@ A plugin is anything the engine accepts through its options. Conventions:
 5. **Docs.** Document here and add a `CHANGELOG.md` entry.
 
 See [browser.md](browser.md) for the dist build and lazy-loading pattern.
+
+---
+
+## JS Plugin API (custom plugins)
+
+Write Jekyll plugins in JavaScript — no Ruby, no Opal, no 3MB runtime.
+The API mirrors Jekyll's Ruby plugin surface (`Jekyll::Hooks`,
+`Jekyll::Generator`, `Liquid::Tag`, filters) so a Ruby plugin ports
+naturally.
+
+```js
+// _plugins/my-plugin.js (or any module)
+export default function myPlugin(engine) {
+  // Hooks (mirrors Jekyll::Hooks.register)
+  engine.registerHook('site', 'post_read', (site) => {
+    const docs = site.collections['articles']?.docs || [];
+    for (const doc of docs) {
+      // doc.data — front matter (Ruby: doc.data['title'])
+      // doc.date — Date object
+      // site.config — _config.yml values (Ruby: site.config['paginate'])
+      // site.pages — mutable array; push new pages here
+      // site.data — _data/ files
+    }
+  });
+
+  // Generators (mirrors Jekyll::Generator)
+  engine.registerGenerator((site) => {
+    const page = engine.createPage({
+      dir: 'generated',
+      name: 'index.html',
+      layout: 'default',   // _layouts/default.html
+      content: '# Hello',  // Markdown body (optional)
+    });
+    page.data.title = 'Generated page';  // Ruby: page.data['title'] =
+    page.data.custom = { nested: 'data' };
+    site.pages.push(page);
+  });
+
+  // Custom Liquid tags (mirrors Liquid::Tag)
+  engine.registerTag('shout', (text) => text.toUpperCase() + '!');
+
+  // Custom filters
+  engine.registerFilter('reverse', (s) => [...s].reverse().join(''));
+}
+
+// Use it:
+const engine = new JekyllEngine({ vfs });
+engine.use(myPlugin);
+await engine.build();
+```
+
+**Available on `engine`:**
+- `engine.use(pluginFn)` — register a plugin (chainable).
+- `engine.registerHook(owner, event, fn)` — `'site'/'post_read'`,
+  `'pages'/'post_init'`, etc. Trigger with `engine.triggerHook(owner, event, ...args)`.
+- `engine.registerGenerator(fn)` — `fn(site)` runs after hooks.
+- `engine.registerTag(name, fn)` / `engine.registerFilter(name, fn)`.
+- `engine.createPage({ dir, name, layout, content })` — new Page.
+- `engine.fileExists(path)` — VFS check (Ruby: `File.exist?`).
+- `engine.logger.warn/info/error` — (Ruby: `Jekyll.logger`).
+- `engine.utils.slugify(str)` — (Ruby: `Jekyll::Utils.slugify`).
+
+**The `site` object:** `site.config`, `site.collections` (`{ name: { docs } }`),
+`site.pages` (mutable), `site.data`, `site.source`. Collection docs expose
+`.data` (front matter) and `.date` like their Ruby counterparts.
+
+Hook timing: `'site'/'post_read'` fires after all files are read, before
+rendering — the same point as Jekyll's `:site, :post_read`. Generators run
+immediately after hooks. Pages pushed to `site.pages` are rendered with
+their `page.data` as front matter (layouts and Liquid work normally).
