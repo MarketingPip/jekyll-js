@@ -2,7 +2,7 @@
  * Benchmark: jekyll-js build performance.
  * Measures cold build time for sites of varying sizes.
  */
-import { JekyllEngine } from './engine.js';
+import { JekyllEngine } from './src/engine.js';
 
 function makeSite(numPosts, numPages) {
   const vfs = {

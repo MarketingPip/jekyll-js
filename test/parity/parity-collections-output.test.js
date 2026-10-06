@@ -1,4 +1,4 @@
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 // True-parity tests for Jekyll collection output behavior, grounded in
 // Jekyll 4.3.2 source (lib/jekyll/site.rb, collection.rb, document.rb,

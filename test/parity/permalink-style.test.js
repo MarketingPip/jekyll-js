@@ -3,7 +3,7 @@
  * _config.yml `permalink_style:` (or `permalink:`) sets the default
  * permalink format. Styles: date (default), pretty, none, ordinal.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 describe('permalink_style config', () => {
   test('pretty style', async () => {

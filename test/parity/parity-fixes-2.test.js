@@ -12,8 +12,8 @@
  * 8. {% highlight linenos %} renders line numbers
  * 9. .scss/.sass with front matter compiles outside assets/ (not _sass/)
  */
-import { JekyllEngine, parseMarkdown } from '../../engine.js';
-import { isSassAsset } from '../../assetsPipeline.js';
+import { JekyllEngine, parseMarkdown } from '../../src/engine.js';
+import { isSassAsset } from '../../src/assetsPipeline.js';
 import { marked } from 'marked';
 import * as sass from 'sass';
 import hljs from 'highlight.js';

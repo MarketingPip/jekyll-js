@@ -1,5 +1,5 @@
-import { JekyllEngine } from '../../engine.js';
-import { defaultVFS } from '../../defaultVFS.js';
+import { JekyllEngine } from '../../src/engine.js';
+import { defaultVFS } from '../../src/defaultVFS.js';
 
 describe('JekyllEngine.build() against the real defaultVFS fixture', () => {
   let results;

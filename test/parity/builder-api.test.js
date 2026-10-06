@@ -2,7 +2,7 @@
  * Fluent builder API + lifecycle events + static render.
  * Cherry-picked from external review; adapted to our tested engine.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 describe('fluent builder', () => {
   test('addLayout/addPage/setConfig chain builds a site', async () => {

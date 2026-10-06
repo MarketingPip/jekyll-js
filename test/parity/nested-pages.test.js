@@ -3,7 +3,7 @@
  * Real Jekyll renders any .md/.html file as a page, regardless of nesting.
  * Previously only top-level files were rendered.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 describe('nested pages', () => {
   test('renders docs/intro.md', async () => {

@@ -11,7 +11,7 @@
  *   - Jekyll::Hooks.trigger :pages, :post_init
  *   - Jekyll::Utils.slugify
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 // Simplified port of the exhibits pagination plugin.
 // Generates /exhibits/categories/<slug>/ index pages.

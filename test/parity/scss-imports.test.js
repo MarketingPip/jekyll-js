@@ -1,7 +1,7 @@
 /**
  * SCSS @import support (verified via battle test).
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 import * as sass from 'sass';
 
 describe('scss imports', () => {

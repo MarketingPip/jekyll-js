@@ -8,7 +8,7 @@
  * - Special dirs (_layouts, _includes, _data, _sass, _config.yml itself)
  *   are infrastructure and are never excluded.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 describe('exclude config', () => {
   test('excludes a top-level page', async () => {

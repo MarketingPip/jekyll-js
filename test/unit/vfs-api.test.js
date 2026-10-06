@@ -2,7 +2,7 @@
  * Programmatic VFS API: build sites with JS calls (writeFile/readFile/
  * removeFile/listFiles) instead of a pre-built vfs JSON object.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 function makeSite() {
   const engine = new JekyllEngine();

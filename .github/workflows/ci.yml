@@ -10,15 +10,14 @@ jobs:
     strategy:
       matrix:
         node-version: [20, 22]
-        tz: ['America/Toronto', 'UTC', 'Pacific/Auckland']
-    env:
-      TZ: ${{ matrix.tz }}
+        timezone: ['America/Toronto', 'UTC', 'Pacific/Auckland']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
       - run: npm ci
       - run: npm test
+        env:
+          TZ: ${{ matrix.timezone }}
       - run: npm run build

@@ -10,8 +10,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { JekyllEngine } from '../engine.js';
-import { readDirToVFS } from '../fs-vfs.js';
+import { JekyllEngine } from '../src/engine.js';
+import { readDirToVFS } from '../src/fs-vfs.js';
 
 const args = process.argv.slice(2);
 const command = args[0];

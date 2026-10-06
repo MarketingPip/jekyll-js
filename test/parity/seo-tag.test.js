@@ -1,4 +1,4 @@
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 describe('jekyll-seo-tag integration', () => {
   const testVFS = {
