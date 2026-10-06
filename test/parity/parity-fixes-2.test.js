@@ -12,9 +12,11 @@
  * 8. {% highlight linenos %} renders line numbers
  * 9. .scss/.sass with front matter compiles outside assets/ (not _sass/)
  */
-import { JekyllEngine, parseMarkdown } from '../engine.js';
-import { isSassAsset } from '../assetsPipeline.js';
+import { JekyllEngine, parseMarkdown } from '../../engine.js';
+import { isSassAsset } from '../../assetsPipeline.js';
 import { marked } from 'marked';
+import * as sass from 'sass';
+import hljs from 'highlight.js';
 
 function collectLogger() {
   const logs = [];
@@ -140,26 +142,26 @@ describe('FIX 5: missing link targets raise', () => {
   });
 });
 
-describe('FIX 6: parse failures warn loudly', () => {
-  test('bad _config.yml logs a warning', () => {
-    const { logs, logger } = collectLogger();
-    new JekyllEngine({
-      vfs: { '_config.yml': 'title: [unclosed\n' },
-      logger,
-    });
-    expect(logs.some((l) => l.level === 'warn' && l.message.includes('_config'))).toBe(true);
+describe('FIX 6: parse failures (Jekyll parity)', () => {
+  test('malformed _config.yml is fatal (Jekyll: configuration.rb raises)', () => {
+    expect(
+      () =>
+        new JekyllEngine({
+          vfs: { '_config.yml': 'title: [unclosed\n' },
+        })
+    ).toThrow(/_config\.yml/i);
   });
 
-  test('bad _data file logs a warning', () => {
-    const { logs, logger } = collectLogger();
-    new JekyllEngine({
-      vfs: { '_data/authors.yml': 'name: [unclosed\n' },
-      logger,
-    });
-    expect(logs.some((l) => l.level === 'warn' && l.message.includes('_data/authors.yml'))).toBe(true);
+  test('malformed _data file is fatal (Jekyll: data_reader has no rescue)', () => {
+    expect(
+      () =>
+        new JekyllEngine({
+          vfs: { '_data/authors.yml': 'name: [unclosed\n' },
+        })
+    ).toThrow(/_data/i);
   });
 
-  test('post with bad front matter logs a warning and is skipped', async () => {
+  test('post with bad front matter warns but is KEPT with empty front matter (Jekyll: convertible.rb)', async () => {
     const { logs, logger } = collectLogger();
     const engine = new JekyllEngine({
       vfs: {
@@ -170,15 +172,17 @@ describe('FIX 6: parse failures warn loudly', () => {
     });
     const res = await engine.build();
     expect(logs.some((l) => l.level === 'warn')).toBe(true);
-    expect(res.some((r) => r.path.includes('bad'))).toBe(false);
+    // Jekyll warns and KEEPS the document (data ||= {}); it does not skip it.
+    expect(res.some((r) => r.path.includes('bad'))).toBe(true);
     expect(res.some((r) => r.path === 'index.md')).toBe(true);
   });
 
-  test('sass compile error logs a warning', async () => {
+  test('sass compile error logs a warning (intentional deviation: Jekyll is fatal, we emit a CSS comment)', async () => {
     const { logs, logger } = collectLogger();
     const engine = new JekyllEngine({
       vfs: { 'assets/main.scss': '---\n---\n.broken {\n  @error "boom";\n}\n' },
       logger,
+      sass,
     });
     await engine.build();
     expect(logs.some((l) => l.level === 'warn' && l.message.includes('main.scss'))).toBe(true);
@@ -200,6 +204,7 @@ describe('FIX 8: highlight linenos', () => {
         'index.md':
           '---\ntitle: H\n---\n{% highlight ruby linenos %}\ndef foo\n  1\nend\n{% endhighlight %}',
       },
+      highlighter: hljs,
     });
     const res = await engine.build();
     expect(res[0].content).toContain('rouge-table');
@@ -211,10 +216,30 @@ describe('FIX 8: highlight linenos', () => {
       vfs: {
         'index.md': '---\ntitle: H\n---\n{% highlight ruby %}\ndef foo\nend\n{% endhighlight %}',
       },
+      highlighter: hljs,
     });
     const res = await engine.build();
     expect(res[0].content).toContain('<figure class="highlight">');
     expect(res[0].content).not.toContain('rouge-table');
+  });
+});
+
+describe('highlight is an optional plugin', () => {
+  test('{% highlight %} without a highlighter throws a clear error', async () => {
+    const engine = new JekyllEngine({
+      vfs: {
+        'index.md': '---\ntitle: H\n---\n{% highlight ruby %}\ndef foo\nend\n{% endhighlight %}',
+      },
+    });
+    await expect(engine.build()).rejects.toThrow(/no syntax highlighter was provided/);
+  });
+
+  test('sites without {% highlight %} build fine with no highlighter', async () => {
+    const engine = new JekyllEngine({
+      vfs: { 'index.md': '---\ntitle: H\n---\nHello\n' },
+    });
+    const res = await engine.build();
+    expect(res.some((r) => r.path === 'index.md')).toBe(true);
   });
 });
 
@@ -234,6 +259,7 @@ describe('FIX 9: scss entry points outside assets/', () => {
         '_sass/_vars.scss': '$c: red;',
         'css/main.scss': '---\n---\n@import "vars";\na { color: $c; }',
       },
+      sass,
     });
     const res = await engine.build();
     const css = res.find((r) => r.permalink === '/css/main.css');
@@ -249,5 +275,20 @@ describe('FIX 9: scss entry points outside assets/', () => {
     });
     const res = await engine.build();
     expect(res.some((r) => r.permalink.includes('_sass'))).toBe(false);
+  });
+
+  test('sass is an optional plugin: scss without a compiler throws a clear error', async () => {
+    const engine = new JekyllEngine({
+      vfs: { 'assets/main.scss': '---\n---\na { color: red; }\n' },
+    });
+    await expect(engine.build()).rejects.toThrow(/no Sass compiler was provided/);
+  });
+
+  test('sites without sass files build fine with no compiler', async () => {
+    const engine = new JekyllEngine({
+      vfs: { 'index.md': '---\ntitle: Hi\n---\nHello\n' },
+    });
+    const res = await engine.build();
+    expect(res.some((r) => r.path === 'index.md')).toBe(true);
   });
 });

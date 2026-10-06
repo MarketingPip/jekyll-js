@@ -14,9 +14,13 @@
  * path to the Sass compiler. We do the same by feeding all `_sass/**` VFS
  * entries to Dart Sass as in-memory importers, which is the approach Dart
  * Sass itself recommends for VFS/in-memory compilation.
+ *
+ * NOTE: dart-sass is NOT imported here. It is an optional plugin: the caller
+ * passes the sass implementation into compileSassAsset() (or via the
+ * JekyllEngine `sass` option). This keeps the core bundle tree-shakeable and
+ * lets browser builds lazy-load the dart-sass chunk only when the site
+ * actually contains .scss/.sass files.
  */
-
-import * as sass from 'sass';
 
 /**
  * Determine if a VFS file should be processed by the Sass pipeline.
@@ -45,9 +49,19 @@ export function isSassAsset(path, content) {
  * @param {string} content - raw file content (may have front matter)
  * @param {Object} vfs - full VFS map (used to resolve @import partials)
  * @param {Object} config - site config (reads `sass.style` for compressed/expanded)
+ * @param {Object} sass - the Sass compiler implementation (dart-sass). Required:
+ *   pass `import * as sass from 'sass'` (Node) or load `dist/sass-plugin.js`
+ *   (browser, sets `window.JekyllSass`).
  * @returns {{ css: string, permalink: string }}
  */
-export function compileSassAsset(path, content, vfs, config = {}) {
+export function compileSassAsset(path, content, vfs, config = {}, sass) {
+  if (!sass) {
+    throw new Error(
+      `Cannot compile ${path}: no Sass compiler provided. ` +
+        `Pass a compiler via the JekyllEngine \`sass\` option ` +
+        `(\`import * as sass from 'sass'\` in Node, or load dist/sass-plugin.js in the browser).`
+    );
+  }
   // Strip front matter before passing to Sass (Sass doesn't understand ---)
   const stripped = content.replace(/^---[\s\S]*?---\n?/, '');
 

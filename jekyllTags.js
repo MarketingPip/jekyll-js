@@ -18,8 +18,12 @@
  *   to_integer -- LiquidJS returns floats unchanged; Jekyll truncates to int
  */
 
-import hljs from 'highlight.js';
 import { TokenKind } from 'liquidjs';
+
+// NOTE: highlight.js is NOT imported here. It is an optional plugin (~1.5MB
+// for the full language build): the caller passes the highlighter into
+// registerJekyllExtensions(). This keeps the core bundle tree-shakeable and
+// lets browser builds lazy-load it only when the site uses {% highlight %}.
 
 // ─── highlight tag ──────────────────────────────────────────────────────────
 // Mirrors Jekyll::Tags::HighlightBlock output format exactly:
@@ -35,7 +39,7 @@ import { TokenKind } from 'liquidjs';
 // class names are not. For the purpose of this engine (rendering content
 // that looks correct in a browser) this is acceptable; if you need
 // byte-identical output to Rouge you would need a Rouge WASM port.
-function registerHighlightTag(engine) {
+function registerHighlightTag(engine, highlighter) {
   engine.registerTag('highlight', {
     parse(tagToken, remainTokens) {
       const args = tagToken.args.trim().split(/\s+/);
@@ -66,13 +70,24 @@ function registerHighlightTag(engine) {
 
       let highlighted;
       try {
+        if (!highlighter) {
+          throw new Error(
+            `{% highlight %} used but no syntax highlighter was provided. ` +
+              `Pass one via \`new JekyllEngine({ highlighter })\` — ` +
+              `\`import hljs from 'highlight.js'\` in Node, or load ` +
+              `dist/highlight-plugin.js (sets window.JekyllHighlight) in the browser.`
+          );
+        }
         const lang = this.lang === 'plaintext' ? 'text' : this.lang;
-        if (hljs.getLanguage(lang)) {
-          highlighted = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+        if (highlighter.getLanguage(lang)) {
+          highlighted = highlighter.highlight(code, { language: lang, ignoreIllegals: true }).value;
         } else {
           highlighted = escapeHtml(code);
         }
-      } catch {
+      } catch (err) {
+        // A missing-highlighter error is honest: rethrow it. Anything else
+        // (bad language grammar, etc.) degrades to escaped plain text.
+        if (/no syntax highlighter was provided/.test(err.message)) throw err;
         highlighted = escapeHtml(code);
       }
 
@@ -293,8 +308,8 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-export function registerJekyllExtensions(liquidEngine) {
-  registerHighlightTag(liquidEngine);
+export function registerJekyllExtensions(liquidEngine, opts = {}) {
+  registerHighlightTag(liquidEngine, opts.highlighter);
   registerLinkTag(liquidEngine);
   registerPostUrlTag(liquidEngine);
   registerSeoTag(liquidEngine);

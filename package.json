@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "node --experimental-vm-modules node_modules/.bin/jest --silent=false"
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --silent=false",
+    "build": "esbuild browser.js --bundle --platform=browser --format=iife --outfile=dist/jekyll-engine.js --minify && esbuild browser-sass.js --bundle --platform=browser --format=iife --outfile=dist/sass-plugin.js --minify && esbuild browser-highlight.js --bundle --platform=browser --format=iife --outfile=dist/highlight-plugin.js --minify"
   },
   "dependencies": {
     "front-matter": "^4.0.2",
@@ -14,6 +15,8 @@
     "sass": "^1.101.0"
   },
   "devDependencies": {
-    "jest": "^30.4.2"
+    "esbuild": "^0.28.2",
+    "jest": "^30.4.2",
+    "memfs": "^4.80.0"
   }
 }

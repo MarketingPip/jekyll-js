@@ -7,7 +7,7 @@ import {
   getPostCategories,
   getPostTags,
   parsePostFilename,
-} from '../engine.js';
+} from '../../engine.js';
 
 describe('slugify (permalink helper)', () => {
   // FIX regression test: original used `\w` and kept underscores
