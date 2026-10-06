@@ -40,7 +40,7 @@ node examples/build-site.js  # smoke-test the programmatic API
 
 Timezones matter: date handling is timezone-sensitive. Verify under
 `America/Toronto`, `UTC`, and `Pacific/Auckland` (`TZ=... npm test`)
-before calling date-related work done. CI runs Node 20 + 22.
+before calling date-related work done. CI runs Node 20 + 22 x America/Toronto, UTC, Pacific/Auckland.
 
 ## Working conventions (non-negotiable)
 
