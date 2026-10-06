@@ -36,13 +36,13 @@ based on the proven jekyll-feed pilot and code analysis of popular plugins.
 
 ## Known Opal Boundaries (hard limits)
 
-1. **Regex lookbehind** (`(?<=...)`, `(?<!...)`) — NOT supported in Opal 1.8.2. Any plugin using it fails. (jekyll-sitemap does.)
-2. **Native extensions** — Any gem with C extensions cannot run. Pure Ruby only.
-3. **`require` of stdlib** — `fileutils`, `json`, `time`, etc. need shims or are missing. The pilot stripped `require "fileutils"`.
-4. **File system access** — No real FS. Must inject a file map via shim.
-5. **`__dir__`** — Works if compiled with Opal's `file:` option (proven in pilot).
-6. **Threads/Fibers** — Limited support. Plugins using them will fail.
-7. **Method_missing / complex metaprogramming** — Opal supports basic `method_missing` but complex DSLs may break.
+1. **Regex with `\n` escapes** — Opal 1.8.2's **parser** splits string/regex literals on `\n`, mangling patterns like `/(?<=>\n|\})\s+/`. **Lookbehind itself WORKS** (passes through to JS RegExp, ES2018+). The blocker is the parser, not the regex engine. Workarounds (`Regexp.new`, `10.chr`) are fragile — `10.chr` produces literal `"\\n"`, not a newline.
+   - **Verdict for jekyll-sitemap:** Use the native JS implementation (already built). Don't fight the parser.
+2. **Native extensions** — Ruby C extensions are written against MRI's C API (`rb_define_method`, `rb_str_new_cstr`, etc.). Clang can compile C→WASM, but without MRI's headers/runtime it won't link. You'd need a full MRI-compatible runtime (that's ruby.wasm at 115MB) or a man-year reimplementation of the C API.
+   - **Pragmatic alternative:** For Jekyll plugins, "native" deps are usually `json`, `nokogiri`, `fileutils`. Provide JS equivalents via the shim (e.g., Ruby's `JSON.parse` → JS `JSON.parse`). Don't try to run the C code.
+3. **File system access** — The Opal *pilot* used an injected file map, but **jekyll-js already supports real FS** via `fs-vfs.js` (`node:fs`, memfs, or plain objects). The Opal shim can bridge to the engine's VFS. This boundary is softer than it appears.
+4. **Threads/Fibers** — Limited support. Plugins using them will fail.
+5. **Method_missing / complex metaprogramming** — Opal supports basic `method_missing` but complex DSLs may break.
 
 ## Plugin Categories
 
