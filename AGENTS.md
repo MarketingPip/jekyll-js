@@ -6,34 +6,56 @@ code. The user-facing docs live in `README.md` and `docs/`.
 
 ## What this is
 
-A JavaScript port of Jekyll's static site engine (target: Jekyll 4.3.2
+A JavaScript port of Jekyll's static site engine (target: Jekyll 4.3.4
 parity). It renders sites entirely in-process from a virtual filesystem
 (a plain `{ "path": "content" }` object) — no Ruby, no real filesystem.
-Consumers: the browser playground (`playground.html`), Node scripts, and
+Consumers: the browser playground (`playground/index.html`), Node scripts, and
 AI agents that need to render Jekyll anywhere.
 
 ## Layout
 
 ```text
-engine.js            JekyllEngine — build(), VFS ingestion, site context
-jekyllTags.js        LiquidJS tag registrations (highlight, link, post_url, seo, feed_meta)
-assetsPipeline.js    Sass helpers (compiler itself is a plugin, not imported here)
-browser.js           Browser entry → dist/jekyll-engine.js (window.JekyllEngine)
-browser-sass.js      Plugin entry → dist/sass-plugin.js (window.JekyllSass)
-browser-highlight.js Plugin entry → dist/highlight-plugin.js (window.JekyllHighlight)
-dist/                Committed build output (rebuilt via npm run build)
-playground.html      Demo + reference browser integration
-examples/            Runnable examples (build-site.js)
-docs/                Developer docs: api/ (engine, plugins, browser, CHANGELOG), parity.md
-test/                unit/ · parity/ · integration/ — see test/README.md
-battletest/          Real minima theme + recorded real-Jekyll ground-truth output
+src/
+  engine.js            JekyllEngine — build(), VFS ingestion, site context
+  jekyllTags.js        LiquidJS tag registrations (highlight, link, post_url, seo, feed_meta)
+  jekyllFeed.js        Native jekyll-feed 0.17.0 (byte-identical to gem)
+  jekyllSitemap.js     Native jekyll-sitemap 1.4.0 (byte-identical to gem)
+  jekyllRedirectFrom.js  JS port of jekyll-redirect-from 0.16.0
+  assetsPipeline.js    Sass helpers (compiler itself is a plugin, not imported here)
+  browser.js           Browser entry → dist/jekyll-engine.js (window.JekyllEngine)
+  ...
+test/
+  unit/                Unit tests (VFS API, etc.)
+  parity/              Parity tests vs real Jekyll (official suite conversions + oracle fixtures)
+  ...
+docs/
+  parity.md            Honest parity scoreboard (update every PR!)
+playground/
+  index.html           Demo + reference browser integration
 ```
+
+## Oracle testing
+
+We have TWO oracles for true parity verification:
+
+1. **Native Ruby** (`~/workspace/jekyll-oracle/jekyll-native.sh`):
+   Real `jekyll` 4.3.4 binary with real gems. Authoritative. Use for
+   all parity claims. Requires Ruby 3.2+ with jekyll gem installed.
+
+2. **WASM** (`~/workspace/jekyll-oracle/jekyll-wasm.sh`):
+   Ruby 4.0 WASM via wasmtime. Slower, has shims (BigDecimal is fake,
+   Sass throws). Useful when native Ruby isn't available, but native
+   is authoritative.
+
+**Rule**: Never claim parity without running the oracle. The WASM oracle
+uses UTC; native uses local timezone — native caught a real timezone bug
+that WASM masked.
 
 ## Commands
 
 ```sh
 npm install   # deps (esbuild is a devDependency)
-npm test      # full suite — 200 tests, must stay green
+npm test      # full suite — 270 tests, must stay green
 npm run build # rebuild dist/ bundles (esbuild: core + 2 plugin chunks)
 node examples/build-site.js  # smoke-test the programmatic API
 ```
@@ -58,13 +80,13 @@ before calling date-related work done. CI runs Node 20 + 22.
 
 ## Parity methodology
 
-- Ground every behavioral claim in **Jekyll 4.3.2 source** (cite file + line
+- Ground every behavioral claim in **Jekyll 4.3.4 source** (cite file + line
   in test comments), jekyllrb.com docs, or recorded real-Jekyll output.
 - Evidence hierarchy: battletest differential (real theme + real output) >
   source-grounded unit tests > our own assumptions.
 - The battletest is the most important test file. When adding features,
   check whether it covers them; if not, add a case.
-- Jekyll source reference: `https://github.com/jekyll/jekyll/tree/v4.3.2/lib/jekyll/`
+- Jekyll source reference: `https://github.com/jekyll/jekyll/tree/v4.3.4/lib/jekyll/`
   (also useful: `related_posts.rb`, `document.rb`, `publisher.rb`,
   `frontmatter_defaults.rb`, `drops/url_drop.rb`).
 

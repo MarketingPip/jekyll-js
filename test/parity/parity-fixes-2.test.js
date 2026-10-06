@@ -12,8 +12,8 @@
  * 8. {% highlight linenos %} renders line numbers
  * 9. .scss/.sass with front matter compiles outside assets/ (not _sass/)
  */
-import { JekyllEngine, parseMarkdown } from '../../engine.js';
-import { isSassAsset } from '../../assetsPipeline.js';
+import { JekyllEngine, parseMarkdown } from '../../src/engine.js';
+import { isSassAsset } from '../../src/assetsPipeline.js';
 import { marked } from 'marked';
 import * as sass from 'sass';
 import hljs from 'highlight.js';
@@ -138,7 +138,7 @@ describe('FIX 5: missing link targets raise', () => {
       },
     });
     const res = await engine.build();
-    expect(res[0].content).toContain('/about/');
+    expect(res[0].content).toContain('/about.html');
   });
 });
 
@@ -264,7 +264,7 @@ describe('FIX 9: scss entry points outside assets/', () => {
     const res = await engine.build();
     const css = res.find((r) => r.permalink === '/css/main.css');
     expect(css).toBeDefined();
-    expect(css.content).toContain('color:red');
+    expect(css.content).toContain('color: red');
   });
 
   test('_sass/ files are never emitted as compiled pages', async () => {

@@ -6,8 +6,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readDirToVFS, DEFAULT_IGNORE } from '../../fs-vfs.js';
-import { JekyllEngine } from '../../engine.js';
+import { readDirToVFS, DEFAULT_IGNORE } from '../../src/fs-vfs.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 function makeTempSite(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jekyll-fs-test-'));
@@ -82,7 +82,7 @@ describe('readDirToVFS', () => {
   });
 
   test('has no node: imports, so it bundles for the browser', () => {
-    const src = fs.readFileSync(new URL('../../fs-vfs.js', import.meta.url), 'utf8');
+    const src = fs.readFileSync(new URL('../../src/fs-vfs.js', import.meta.url), 'utf8');
     // Strip comments: the doc comment and error message legitimately
     // mention 'node:fs' — we only care about real import statements.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');

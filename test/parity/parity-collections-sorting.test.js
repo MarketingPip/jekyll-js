@@ -1,4 +1,4 @@
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 // True-parity tests grounded in Jekyll 4.3.2 source:
 //   Collection#read -> sort_docs! -> Document#<=> : date ASCENDING,

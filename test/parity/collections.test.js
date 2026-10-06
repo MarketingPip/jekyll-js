@@ -1,4 +1,4 @@
-import { JekyllEngine, normalizeCollectionsConfig, generateCollectionPermalink } from '../../engine.js';
+import { JekyllEngine, normalizeCollectionsConfig, generateCollectionPermalink } from '../../src/engine.js';
 
 describe('FIX -- custom front-matter fields on site.posts (e.g. "sort: listing-order")', () => {
   const vfs = {
@@ -65,7 +65,7 @@ describe('FIX -- generic Jekyll collections (previously entirely unimplemented)'
     const ctx = engine._buildSiteContext();
     const alpha = ctx.site.projects.find((p) => p.title === 'Alpha');
     expect(alpha['listing-order']).toBe(2);
-    expect(alpha.content).toBe('Alpha body');
+    expect(alpha.content).toContain('<p>Alpha body</p>');
   });
 
   test('default collection permalink is /:collection/:path/', () => {

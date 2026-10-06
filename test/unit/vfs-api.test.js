@@ -2,7 +2,7 @@
  * Programmatic VFS API: build sites with JS calls (writeFile/readFile/
  * removeFile/listFiles) instead of a pre-built vfs JSON object.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 function makeSite() {
   const engine = new JekyllEngine();
@@ -15,14 +15,14 @@ function makeSite() {
 describe('programmatic VFS API', () => {
   test('writeFile accumulates files and build() renders them', async () => {
     const pages = await makeSite().build();
-    expect(pages.some((p) => p.permalink === '/' && p.content.includes('<h1>Hi</h1>'))).toBe(true);
+    expect(pages.some((p) => p.permalink === '/' && p.content.includes('<h1 id="hi">Hi</h1>'))).toBe(true);
   });
 
   test('writeFile overwrites an existing file', async () => {
     const engine = makeSite();
     engine.writeFile('index.md', '---\nlayout: default\ntitle: Home\n---\n# Changed\n');
     const pages = await engine.build();
-    expect(pages.find((p) => p.permalink === '/').content).toContain('<h1>Changed</h1>');
+    expect(pages.find((p) => p.permalink === '/').content).toContain('<h1 id="changed">Changed</h1>');
   });
 
   test('readFile returns content, undefined for missing files', () => {
@@ -34,9 +34,9 @@ describe('programmatic VFS API', () => {
   test('removeFile drops the file from the next build', async () => {
     const engine = makeSite();
     engine.writeFile('about.md', '---\ntitle: About\n---\nAbout\n');
-    expect((await engine.build()).some((p) => p.permalink === '/about/')).toBe(true);
+    expect((await engine.build()).some((p) => p.permalink === '/about.html')).toBe(true);
     engine.removeFile('about.md');
-    expect((await engine.build()).some((p) => p.permalink === '/about/')).toBe(false);
+    expect((await engine.build()).some((p) => p.permalink === '/about.html')).toBe(false);
   });
 
   test('listFiles reflects writes and removals', () => {

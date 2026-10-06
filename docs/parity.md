@@ -1,17 +1,33 @@
 # Parity status
 
-How faithfully does this engine match real Jekyll (4.3.2)? This file is
+How faithfully does this engine match real Jekyll (4.3.4)? This file is
 the honest scoreboard: what's verified, how it was verified, what's
 missing, and where we deliberately differ.
 
-## Grounding (2026-10-05 audit, 189 tests)
+**Target version: Jekyll 4.3.4** (updated 2026-10-06; was 4.3.2).
+Verified via native Ruby oracle (real `jekyll` binary) and WASM oracle.
+
+## Grounding (2026-10-06, 270 tests)
 
 | Grounding | Tests | What it means |
 |---|---|---|
-| Jekyll 4.3.2 source | ~50% | Assertions checked against the actual gem source (file + line cited in test comments) |
+| Jekyll 4.3.4 source | ~40% | Assertions checked against the actual gem source (file + line cited in test comments) |
+| Native Ruby oracle | ~30% | Byte-identical output vs real `jekyll build` (feed, sitemap, Minima theme, filters, redirects) |
 | Jekyll docs / web standards | ~10% | kramdown behavior, jekyll-sass-converter rules, post filename conventions |
-| Recorded real-Jekyll output | ~20% | The battletest builds the real minima theme and diffs against actual `jekyll build` output |
 | Own design | ~20% | Our APIs (programmatic VFS, plugin system) — no parity claim made |
+
+Verified-against-oracle (byte-identical to real Jekyll 4.3.4):
+- **jekyll-feed 0.17.0**: feed.xml byte-identical (MINIFY_REGEX, rendered content, post.id)
+- **jekyll-sitemap 1.4.0**: sitemap.xml byte-identical (real template, MINIFY_REGEX)
+- **jekyll-seo-tag 2.8.0**: SEO tags byte-identical (JSON-LD, meta tags)
+- **jekyll-redirect-from 0.16.0**: redirect pages byte-identical (JS port)
+- **Minima 2.5.1 theme**: index.html, about.html byte-identical
+- **Liquid filters**: date_to_xmlschema, date_to_rfc822, xml_escape, cgi_escape,
+  uri_escape, number_of_words, array_to_sentence_string, smartify, slugify,
+  where_exp, group_by — all match
+- **Page URLs**: /about.html (not /about/) matches Jekyll default
+- **Timezones**: date_to_xmlschema outputs local offset (-05:00), not UTC
+- **Sass**: expanded output by default (matches jekyll-sass-converter)
 
 Verified-against-source examples: `related_posts` algorithm
 (`related_posts.rb:49`), publisher semantics (`publisher.rb`), collection
@@ -26,16 +42,22 @@ paginator shape (`jekyll-paginate`), front-matter defaults
 Posts, drafts, pages, collections (output true/false, sorting, permalinks,
 `site.documents`), pagination, excerpts, `site.data`, static files,
 front-matter `defaults:`, Sass pipeline, `{% highlight %}`,
-`{% link %}`/`{% post_url %}`, SEO/feed meta tags, timezone-correct dates.
+`{% link %}`/`{% post_url %}`, `{% include_cached %}` (jekyll-include-cache),
+SEO/feed/sitemap/redirect plugins,
+timezone-correct dates, `permalink_style` (pretty/date/none/ordinal),
+`exclude`/`include` config, nested pages.
 
 ## Known gaps
 
-1. `permalink_style` (`pretty`/`date`/`none`/`ordinal`) — not implemented.
-2. Collection `sort_by` / `order` metadata — not implemented.
-3. `exclude` / `include` config — files are still processed.
-4. Nested pages (`docs/intro.md`) — not discovered as pages yet.
-5. Excerpt edge cases (empty `excerpt_separator`, link-ref appending).
-6. Timezone matrix runs in CI (currently verified manually).
+1. **Markdown engine**: We use marked.js, not kramdown. Known divergences:
+   whitespace between block elements, some edge cases in footnote/IAL
+   syntax. The `kramdown-js` project aims for full parity.
+2. **Sass source maps**: Real Jekyll emits `/*# sourceMappingURL=... */`;
+   we don't generate source maps yet.
+3. **Collection `sort_by` / `order` metadata** — not implemented.
+4. **Excerpt edge cases** (empty `excerpt_separator`, link-ref appending).
+5. **BigDecimal precision**: WASM oracle uses float-backed shim; native
+   oracle is authoritative for numeric edge cases.
 
 ## Intentional deviations
 
