@@ -17,6 +17,7 @@ import * as yaml from 'js-yaml';
 import fm from 'front-matter';
 import { registerJekyllExtensions } from './jekyllTags.js';
 import { isSassAsset, compileSassAsset } from './assetsPipeline.js';
+import { isFeedEnabled, generateFeeds } from './jekyllFeed.js';
 
 const noop = () => {};
 
@@ -1291,6 +1292,20 @@ export class JekyllEngine {
       };
       results.push(cssResult);
       if (this.options.stdout) this.options.stdout(cssResult);
+    }
+
+    // FIX (jekyll-feed generator): the real jekyll-feed plugin generates
+    // /feed.xml (+ per-category feeds) via its Generator. We implement it
+    // natively with the gem's own feed.xml template (jekyllFeed.js) —
+    // opt-in via `plugins: [jekyll-feed]` in _config.yml, exactly like
+    // real Jekyll.
+    if (isFeedEnabled(this._config)) {
+      this.options.logger('Generating Atom feeds (jekyll-feed)...', 'info');
+      const feedResults = await generateFeeds(this);
+      for (const feedResult of feedResults) {
+        results.push(feedResult);
+        if (this.options.stdout) this.options.stdout(feedResult);
+      }
     }
 
     return results;

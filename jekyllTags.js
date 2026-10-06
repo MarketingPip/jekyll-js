@@ -175,8 +175,8 @@ function registerPostUrlTag(engine) {
 // ─── {% seo %} tag ──────────────────────────────────────────────────────────
 // A faithful (not no-op) implementation of the most load-bearing parts of
 // the jekyll-seo-tag plugin, grounded directly in the real gem's
-// lib/jekyll-seo-tag/drop.rb (read from the installed gem). minima's
-// _includes/head.html relies ENTIRELY on {% seo %} for the page's
+// lib/jekyll-seo-tag/drop.rb and lib/template.html (read from the installed gem).
+// minima's _includes/head.html relies ENTIRELY on {% seo %} for the page's
 // <title> tag -- there is no other fallback anywhere in the layout chain
 // -- so treating this as a pure no-op silently produces titleless pages,
 // which is a real and meaningful gap, not a cosmetic one.
@@ -188,13 +188,17 @@ function registerPostUrlTag(engine) {
 //   <meta property="og:title">, <meta name="description">,
 //   <meta property="og:description">, <link rel="canonical">,
 //   <meta property="og:url">, <meta property="og:type">
+//   <meta property="og:site_name">
+//   Twitter card meta (summary / summary_large_image)
+//   og:image, og:image:width, og:image:height, og:image:alt
+//   JSON-LD structured data script tag
+//   Author meta
+//   Webmaster verification tags (google, bing, alexa, yandex, baidu, facebook)
+//   Facebook meta (admins, publisher, app_id)
 //
-// NOT implemented (documented limitation): Twitter card meta, Facebook
-// meta, JSON-LD structured data script tag, image meta (og:image and
-// friends), webmaster verification tags, author meta. These are real
-// gaps if you depend on rich social-card previews specifically, but they
-// don't affect page title/SEO-description fidelity, which is the part
-// every page actually needs.
+// The implementation mirrors the real jekyll-seo-tag 2.8.0 template.html
+// and the Drop class logic from drop.rb, author_drop.rb, image_drop.rb,
+// json_ld_drop.rb, and url_helper.rb.
 function registerSeoTag(engine) {
   engine.registerTag('seo', {
     parse(tagToken) {
@@ -204,6 +208,7 @@ function registerSeoTag(engine) {
       const site = ctx.get(['site']) || {};
       const page = ctx.get(['page']) || {};
       const jekyll = ctx.get(['jekyll']) || {};
+      const paginator = ctx.get(['paginator']) || null;
 
       const siteTitle = site.title || site.name;
       const pageTitle = page.title || siteTitle;
@@ -221,26 +226,233 @@ function registerSeoTag(engine) {
       const description = page.description || page.excerpt || site.description;
       const showTitle = !/title=false/i.test(this.raw) && !!title;
 
-      const lines = [`<!-- Begin Jekyll SEO tag v0 (approximate) -->`];
+      // Image handling (mirrors ImageDrop logic)
+      let imagePath = null;
+      let imageWidth = null;
+      let imageHeight = null;
+      let imageAlt = null;
+      if (page.image) {
+        if (typeof page.image === 'string') {
+          imagePath = page.image;
+        } else if (typeof page.image === 'object') {
+          imagePath = page.image.path || page.image.facebook || page.image.twitter;
+          imageWidth = page.image.width;
+          imageHeight = page.image.height;
+          imageAlt = page.image.alt;
+        }
+      }
+
+      // Author handling (mirrors AuthorDrop logic)
+      let authorName = null;
+      let authorTwitter = null;
+      if (page.author) {
+        if (typeof page.author === 'string') {
+          authorName = page.author;
+        } else if (typeof page.author === 'object') {
+          authorName = page.author.name;
+          authorTwitter = page.author.twitter;
+        }
+      } else if (site.author) {
+        if (typeof site.author === 'string') {
+          authorName = site.author;
+        } else if (typeof site.author === 'object') {
+          authorName = site.author.name;
+          authorTwitter = site.author.twitter;
+        }
+      }
+
+      // JSON-LD generation (mirrors JSONLDDrop logic)
+      function buildJsonLd() {
+        const jsonLd = {
+          '@context': 'https://schema.org',
+        };
+
+        // @type
+        let type = 'WebPage';
+        if (page.date) {
+          type = 'BlogPosting';
+        } else if (page.url && (page.url === '/' || page.url === '/index.html' || page.url === '/about/' || page.url === '/about.html')) {
+          type = 'WebSite';
+        }
+        jsonLd['@type'] = type;
+
+        // name (headline)
+        if (pageTitle) jsonLd.name = pageTitle;
+
+        // headline
+        if (pageTitle) jsonLd.headline = pageTitle;
+
+        // description
+        if (description) jsonLd.description = description;
+
+        // url (canonical)
+        if (site.url) {
+          const canonical = (site.url || '') + (site.baseurl || '') + (page.url || '');
+          jsonLd.url = canonical;
+        }
+
+        // datePublished / dateModified
+        if (page.date) {
+          const datePublished = new Date(page.date).toISOString();
+          jsonLd.datePublished = datePublished;
+        }
+
+        // author
+        if (authorName) {
+          jsonLd.author = {
+            '@type': 'Person',
+            name: authorName,
+          };
+        }
+
+        // image
+        if (imagePath) {
+          jsonLd.image = imagePath;
+        }
+
+        // publisher (if logo)
+        if (site.logo) {
+          jsonLd.publisher = {
+            '@type': 'Organization',
+            logo: {
+              '@type': 'ImageObject',
+              url: site.logo,
+            },
+          };
+          if (authorName) jsonLd.publisher.name = authorName;
+        }
+
+        // mainEntityOfPage
+        if (type === 'BlogPosting' || type === 'CreativeWork') {
+          jsonLd.mainEntityOfPage = {
+            '@type': 'WebPage',
+            '@id': jsonLd.url,
+          };
+        }
+
+        // sameAs (links)
+        const links = (site.social && site.social.links) || [];
+        if (links.length > 0) {
+          jsonLd.sameAs = links;
+        }
+
+        return jsonLd;
+      }
+
+      const jsonLd = buildJsonLd();
+      const jsonLdString = JSON.stringify(jsonLd, null, 0);
+
+      const lines = [`<!-- Begin Jekyll SEO tag v${jekyll.version || '2.8.0'} -->`];
+
+      // Title
       if (showTitle) lines.push(`<title>${escapeHtml(stripHtml(title))}</title>`);
+
+      // Generator
       lines.push(`<meta name="generator" content="Jekyll v${jekyll.version || '4.3.2'}" />`);
+
+      // og:title
       if (pageTitle) lines.push(`<meta property="og:title" content="${escapeHtml(stripHtml(pageTitle))}" />`);
+
+      // Author name meta
+      if (authorName) lines.push(`<meta name="author" content="${escapeHtml(stripHtml(authorName))}" />`);
+
+      // og:locale
+      const pageLang = page.lang || site.lang || 'en_US';
+      const pageLocale = (page.locale || site.locale || pageLang).replace('-', '_');
+      lines.push(`<meta property="og:locale" content="${pageLocale}" />`);
+
+      // Description
       if (description) {
         const d = escapeHtml(stripHtml(description));
         lines.push(`<meta name="description" content="${d}" />`);
         lines.push(`<meta property="og:description" content="${d}" />`);
       }
+
+      // Canonical URL and og:url
       if (site.url) {
         const canonical = (site.url || '') + (site.baseurl || '') + (page.url || '');
         lines.push(`<link rel="canonical" href="${canonical}" />`);
         lines.push(`<meta property="og:url" content="${canonical}" />`);
       }
+
+      // og:site_name
       if (siteTitle) lines.push(`<meta property="og:site_name" content="${escapeHtml(stripHtml(siteTitle))}" />`);
+
+      // og:type
       if (page.date) {
         lines.push(`<meta property="og:type" content="article" />`);
+        const datePublished = new Date(page.date).toISOString();
+        lines.push(`<meta property="article:published_time" content="${datePublished}" />`);
       } else {
         lines.push(`<meta property="og:type" content="website" />`);
       }
+
+      // Pagination prev/next
+      if (paginator) {
+        if (paginator.previous_page) {
+          const prevUrl = (site.url || '') + (site.baseurl || '') + (paginator.previous_page_path || '');
+          lines.push(`<link rel="prev" href="${prevUrl}" />`);
+        }
+        if (paginator.next_page) {
+          const nextUrl = (site.url || '') + (site.baseurl || '') + (paginator.next_page_path || '');
+          lines.push(`<link rel="next" href="${nextUrl}" />`);
+        }
+      }
+
+      // Image meta
+      if (imagePath) {
+        lines.push(`<meta property="og:image" content="${escapeHtml(imagePath)}" />`);
+        if (imageHeight) lines.push(`<meta property="og:image:height" content="${imageHeight}" />`);
+        if (imageWidth) lines.push(`<meta property="og:image:width" content="${imageWidth}" />`);
+        if (imageAlt) lines.push(`<meta property="og:image:alt" content="${escapeHtml(stripHtml(imageAlt))}" />`);
+      }
+
+      // Twitter cards
+      if (imagePath) {
+        const twitterCard = page.twitter?.card || site.twitter?.card || 'summary_large_image';
+        lines.push(`<meta name="twitter:card" content="${twitterCard}" />`);
+        lines.push(`<meta property="twitter:image" content="${escapeHtml(imagePath)}" />`);
+      } else {
+        lines.push(`<meta name="twitter:card" content="summary" />`);
+      }
+      if (imageAlt) lines.push(`<meta name="twitter:image:alt" content="${escapeHtml(stripHtml(imageAlt))}" />`);
+      if (pageTitle) lines.push(`<meta property="twitter:title" content="${escapeHtml(stripHtml(pageTitle))}" />`);
+
+      // Twitter site/creator
+      if (site.twitter?.username) {
+        const twitterSite = site.twitter.username.replace('@', '');
+        lines.push(`<meta name="twitter:site" content="@${twitterSite}" />`);
+      }
+      if (authorTwitter) {
+        const twitterCreator = authorTwitter.replace('@', '');
+        lines.push(`<meta name="twitter:creator" content="@${twitterCreator}" />`);
+      }
+
+      // Facebook meta
+      if (site.facebook) {
+        if (site.facebook.admins) lines.push(`<meta property="fb:admins" content="${site.facebook.admins}" />`);
+        if (site.facebook.publisher) lines.push(`<meta property="article:publisher" content="${site.facebook.publisher}" />`);
+        if (site.facebook.app_id) lines.push(`<meta property="fb:app_id" content="${site.facebook.app_id}" />`);
+      }
+
+      // Webmaster verifications
+      const webmaster = site.webmaster_verifications || {};
+      if (webmaster.google) lines.push(`<meta name="google-site-verification" content="${webmaster.google}" />`);
+      if (webmaster.bing) lines.push(`<meta name="msvalidate.01" content="${webmaster.bing}" />`);
+      if (webmaster.alexa) lines.push(`<meta name="alexaVerifyID" content="${webmaster.alexa}" />`);
+      if (webmaster.yandex) lines.push(`<meta name="yandex-verification" content="${webmaster.yandex}" />`);
+      if (webmaster.baidu) lines.push(`<meta name="baidu-site-verification" content="${webmaster.baidu}" />`);
+      if (webmaster.facebook) lines.push(`<meta name="facebook-domain-verification" content="${webmaster.facebook}" />`);
+      // Legacy google_site_verification
+      else if (site.google_site_verification) {
+        lines.push(`<meta name="google-site-verification" content="${site.google_site_verification}" />`);
+      }
+
+      // JSON-LD structured data
+      lines.push(`<script type="application/ld+json">`);
+      lines.push(`  ${jsonLdString}`);
+      lines.push(`</script>`);
+
       lines.push(`<!-- End Jekyll SEO tag -->`);
       return lines.join('\n');
     },
@@ -253,20 +465,17 @@ function stripHtml(str) {
 
 // ─── {% feed_meta %} tag ────────────────────────────────────────────────────
 // jekyll-feed's tag, which outputs a <link rel="alternate" type="application/
-// atom+xml"> pointing at the site's feed.xml. We render the tag (so the link
-// is present, since several themes and browsers genuinely use this for feed
-// discovery) but do NOT generate an actual feed.xml file -- that would
-// require implementing the Atom feed XML generator itself, which is a much
-// larger, separate piece of work than this single Liquid tag.
+// atom+xml"> pointing at the site's feed.xml (absolute URL, matching the
+// real gem's meta-tag.rb). The feed itself is generated by the native
+// jekyll-feed generator (jekyllFeed.js) when `plugins: [jekyll-feed]` is set.
 function registerFeedMetaTag(engine) {
   engine.registerTag('feed_meta', {
     parse() {},
     render(ctx) {
       const site = ctx.get(['site']) || {};
       const title = site.title || site.name || '';
-      return `<link type="application/atom+xml" rel="alternate" href="${
-        (site.baseurl || '') + '/feed.xml'
-      }" title="${escapeHtml(stripHtml(title))}" />`;
+      const url = (site.url || '').replace(/\/$/, '') + (site.baseurl || '') + '/feed.xml';
+      return `<link type="application/atom+xml" rel="alternate" href="${url}" title="${escapeHtml(stripHtml(title))}" />`;
     },
   });
 }
@@ -296,6 +505,33 @@ function registerFilterFixes(engine) {
       return m ? parseInt(m[1], 10) : 0;
     }
     return 0;
+  });
+
+  // Core Jekyll filters needed by the real jekyll-feed template (and useful
+  // generally). Grounded in jekyll/lib/jekyll/filters.rb.
+  engine.registerFilter('xml_escape', (input) => {
+    if (input == null) return '';
+    return String(input)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  });
+
+  engine.registerFilter('smartify', (input) => {
+    if (input == null) return '';
+    return String(input)
+      .replace(/---/g, '\u2014')
+      .replace(/--/g, '\u2013')
+      .replace(/\.\.\./g, '\u2026')
+      .replace(/"([^"]*)"/g, '\u201c$1\u201d')
+      .replace(/'([^']*)'/g, '\u2018$1\u2019');
+  });
+
+  engine.registerFilter('normalize_whitespace', (input) => {
+    if (input == null) return '';
+    return String(input).replace(/\s+/g, ' ').trim();
   });
 }
 
