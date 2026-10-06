@@ -155,6 +155,18 @@ markedRenderer.code = (token) => {
     text
   )}</code></pre></figure>`;
 };
+// FIX (header IDs): kramdown adds id="..." to headers (e.g. <h1 id="hello-world">).
+// Marked.js doesn't by default. This matches kramdown's slug generation.
+markedRenderer.heading = (token) => {
+  const { text, depth } = typeof token === 'object' ? token : { text: token, depth: 1 };
+  // Strip HTML tags, lowercase, replace non-alphanum with hyphens
+  const id = text
+    .replace(/<[^>]*>/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  return `<h${depth} id="${id}">${text}</h${depth}>\n`;
+};
 const mdParser = new Marked({ renderer: markedRenderer });
 
 function escapeHtmlForMarkdown(str) {
@@ -211,10 +223,15 @@ function getPostTags(frontMatter) {
 
 function parsePostFilename(filename) {
   // FIX (.markdown extension): Jekyll accepts both .md and .markdown
-  const match = filename.match(/^(\d{4})-(\d{2})-(\d{2})-(.+)\.(md|markdown)$/);
+  // FIX (abbreviated dates): Jekyll's DATE_FILENAME_MATCHER is
+  // (\d{2,4}-\d{1,2}-\d{1,2}) — month/day can be 1-2 digits (e.g. 2017-2-5).
+  const match = filename.match(/^(\d{2,4})-(\d{1,2})-(\d{1,2})-(.+)\.(md|markdown)$/);
   if (!match) return null;
   const [, year, month, day, slug] = match;
-  return { date: `${year}-${month}-${day}`, slug: slug.replace(/-/g, ' ') };
+  // Zero-pad month/day for ISO date format
+  const mm = month.padStart(2, '0');
+  const dd = day.padStart(2, '0');
+  return { date: `${year}-${mm}-${dd}`, slug: slug.replace(/-/g, ' ') };
 }
 
 function generatePermalink(frontMatter, slug, date, config = {}) {
@@ -1452,7 +1469,7 @@ export class JekyllEngine {
       // `options.environment` to the constructor to override.
       jekyll: {
         environment: this.options.environment || 'development',
-        version: '4.3.2',
+        version: '4.3.4',
       },
     };
     // FIX (pagination was entirely unimplemented): exposes `paginator`
