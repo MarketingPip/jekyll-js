@@ -263,6 +263,10 @@ function registerSeoTag(engine) {
 
       // JSON-LD generation (mirrors JSONLDDrop logic)
       function buildJsonLd() {
+        // FIX (oracle-found): Field order and values must match the real
+        // jekyll-seo-tag 2.8.0 gem exactly. For WebSite type:
+        // - order: @context, @type, description, headline, name, url
+        // - name is the SITE title, not page title
         const jsonLd = {
           '@context': 'https://schema.org',
         };
@@ -276,14 +280,18 @@ function registerSeoTag(engine) {
         }
         jsonLd['@type'] = type;
 
-        // name (headline)
-        if (pageTitle) jsonLd.name = pageTitle;
+        // description (before headline/name, per real gem)
+        if (description) jsonLd.description = description;
 
-        // headline
+        // headline (page title)
         if (pageTitle) jsonLd.headline = pageTitle;
 
-        // description
-        if (description) jsonLd.description = description;
+        // name: site title for WebSite, page title otherwise
+        if (type === 'WebSite') {
+          if (site.title) jsonLd.name = site.title;
+        } else if (pageTitle) {
+          jsonLd.name = pageTitle;
+        }
 
         // url (canonical)
         if (site.url) {
@@ -342,13 +350,15 @@ function registerSeoTag(engine) {
       const jsonLd = buildJsonLd();
       const jsonLdString = JSON.stringify(jsonLd, null, 0);
 
-      const lines = [`<!-- Begin Jekyll SEO tag v${jekyll.version || '2.8.0'} -->`];
+      // FIX (oracle-found): SEO tag version is the gem version (2.8.0),
+      // not the Jekyll version. The real gem hardcodes this.
+      const lines = [`<!-- Begin Jekyll SEO tag v2.8.0 -->`];
 
       // Title
       if (showTitle) lines.push(`<title>${escapeHtml(stripHtml(title))}</title>`);
 
       // Generator
-      lines.push(`<meta name="generator" content="Jekyll v${jekyll.version || '4.3.2'}" />`);
+      lines.push(`<meta name="generator" content="Jekyll v${jekyll.version || '4.3.4'}" />`);
 
       // og:title
       if (pageTitle) lines.push(`<meta property="og:title" content="${escapeHtml(stripHtml(pageTitle))}" />`);
@@ -449,12 +459,15 @@ function registerSeoTag(engine) {
       }
 
       // JSON-LD structured data
+      // FIX (oracle-found): real gem outputs compact JSON on one line,
+      // with </script> on the same line as the JSON.
       lines.push(`<script type="application/ld+json">`);
-      lines.push(`  ${jsonLdString}`);
-      lines.push(`</script>`);
+      lines.push(`${jsonLdString}</script>`);
 
       lines.push(`<!-- End Jekyll SEO tag -->`);
-      return lines.join('\n');
+      // FIX (oracle-found): real gem's output ends with a newline,
+      // so </head> starts on a new line.
+      return lines.join('\n') + '\n';
     },
   });
 }

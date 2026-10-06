@@ -15,14 +15,14 @@ function makeSite() {
 describe('programmatic VFS API', () => {
   test('writeFile accumulates files and build() renders them', async () => {
     const pages = await makeSite().build();
-    expect(pages.some((p) => p.permalink === '/' && p.content.includes('<h1>Hi</h1>'))).toBe(true);
+    expect(pages.some((p) => p.permalink === '/' && p.content.includes('<h1 id="hi">Hi</h1>'))).toBe(true);
   });
 
   test('writeFile overwrites an existing file', async () => {
     const engine = makeSite();
     engine.writeFile('index.md', '---\nlayout: default\ntitle: Home\n---\n# Changed\n');
     const pages = await engine.build();
-    expect(pages.find((p) => p.permalink === '/').content).toContain('<h1>Changed</h1>');
+    expect(pages.find((p) => p.permalink === '/').content).toContain('<h1 id="changed">Changed</h1>');
   });
 
   test('readFile returns content, undefined for missing files', () => {
