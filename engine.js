@@ -210,12 +210,15 @@ function parsePostFilename(filename) {
 function generatePermalink(frontMatter, slug, date, config = {}) {
   if (frontMatter.permalink) return frontMatter.permalink;
 
-  let pattern = frontMatter.permalink_style || config.permalink || 'date';
+  // Jekyll supports both `permalink:` and (deprecated) `permalink_style:`
+  // in _config.yml. Front-matter `permalink_style:` also works per-document.
+  let pattern = frontMatter.permalink_style || config.permalink || config.permalink_style || 'date';
 
   const presets = {
     date: '/:categories/:year/:month/:day/:title.html',
     pretty: '/:categories/:year/:month/:day/:title/',
-    none: '/:categories/:title',
+    none: '/:categories/:title.html',
+    ordinal: '/:categories/:year/:y_day/:title.html',
   };
 
   if (presets[pattern]) {
@@ -232,6 +235,9 @@ function generatePermalink(frontMatter, slug, date, config = {}) {
   const year = parsedDate.getUTCFullYear();
   const month = String(parsedDate.getUTCMonth() + 1).padStart(2, '0');
   const day = String(parsedDate.getUTCDate()).padStart(2, '0');
+  // Day of year for :y_day (ordinal permalink style). Jan 1 = 001.
+  const startOfYear = Date.UTC(year, 0, 1);
+  const yDay = String(Math.floor((parsedDate.getTime() - startOfYear) / 86400000) + 1).padStart(3, '0');
 
   // FIX (#4 in review -- :title permalink placeholder precedence):
   // Jekyll's docs define `:title` as "the slugified title from the
@@ -256,6 +262,7 @@ function generatePermalink(frontMatter, slug, date, config = {}) {
     .replace(/:year/g, year)
     .replace(/:month/g, month)
     .replace(/:day/g, day)
+    .replace(/:y_day/g, yDay)
     .replace(/:title/g, s)
     .replace(/:slug/g, slugify(slug || ''));
 
@@ -983,10 +990,10 @@ export class JekyllEngine {
         continue;
       }
 
-      // FIX (.markdown extension): Jekyll supports both .md and .markdown
-      // as Markdown file extensions. The original only checked for .md in
-      // the root page branch.
-      if (/\.(md|markdown|html|liquid)$/i.test(path) && !path.includes('/')) {
+      // FIX (nested pages): Jekyll renders any .md/.markdown/.html/.liquid
+      // file as a page, regardless of directory nesting. Previously only
+      // top-level files were treated as pages.
+      if (/\.(md|markdown|html|liquid)$/i.test(path)) {
         this._rootPages.push({ path, content });
         continue;
       }
