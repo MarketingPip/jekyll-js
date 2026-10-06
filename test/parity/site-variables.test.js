@@ -2,7 +2,7 @@
  * Site/page variables audit (Jekyll parity).
  * Verifies every documented site.* and page.* variable works.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 describe('site variables', () => {
   test('all documented site.* variables exist', async () => {

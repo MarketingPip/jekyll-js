@@ -2,7 +2,7 @@
  * Circular import safety (robustness).
  * Includes and layouts that reference each other must not infinite-loop.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 describe('circular includes', () => {
   test('self-referencing include does not hang', async () => {

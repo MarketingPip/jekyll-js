@@ -17,8 +17,8 @@
 import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { JekyllEngine } from '../../engine.js';
-import { readDirToVFS } from '../../fs-vfs.js';
+import { JekyllEngine } from '../../src/engine.js';
+import { readDirToVFS } from '../../src/fs-vfs.js';
 import * as sass from 'sass';
 import hljs from 'highlight.js';
 

@@ -3,7 +3,7 @@
  * When a post has no `title:` in front matter, Jekyll uses the
  * titleized filename slug. (Found via Minima theme battle test.)
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 describe('title fallback', () => {
   test('uses titleized slug when no title in front matter', async () => {

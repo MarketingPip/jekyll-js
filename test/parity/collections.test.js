@@ -1,4 +1,4 @@
-import { JekyllEngine, normalizeCollectionsConfig, generateCollectionPermalink } from '../../engine.js';
+import { JekyllEngine, normalizeCollectionsConfig, generateCollectionPermalink } from '../../src/engine.js';
 
 describe('FIX -- custom front-matter fields on site.posts (e.g. "sort: listing-order")', () => {
   const vfs = {

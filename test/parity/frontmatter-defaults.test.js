@@ -19,7 +19,7 @@
  * - Values deep-merge for nested hashes.
  * - Deprecated singular types (page/post/draft) normalize to plural.
  */
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 function build(vfs) {
   return new JekyllEngine({ vfs })._buildSiteContext();
