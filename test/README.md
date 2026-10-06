@@ -28,8 +28,15 @@ Suite layout (run everything with `npm test` from the repo root):
   `seo-tag.test.js` (the `{% seo %}` tag — faithful to jekyll-seo-tag 2.8.0:
   title, meta/og tags, canonical, Twitter cards, JSON-LD), and
   `jekyll-feed.test.js` (native Atom feed generator using the real
-  jekyll-feed 0.17.0 template: `/feed.xml`, category feeds, `{% feed_meta %}`).
+  jekyll-feed 0.17.0 template: `/feed.xml`, category feeds, `{% feed_meta %}`),
+  `include-params.test.js` (`{% include %}` with parameters — string/number/variable
+  args accessible as `{{ include.name }}`),
+  `include-cached.test.js` (`{% include_cached %}` from jekyll-include-cache —
+  renders identically to `{% include %}`),
+  `no-frontmatter.test.js` (`.md` without front matter is a static file,
+  not a page — matches Jekyll's reader.rb), and `nested-layouts.test.js`
+  (layout chains — a layout with its own `layout:` front matter renders inside-out).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,
-  compared against the Jekyll 4.3.2 ground truth in `battletest/`).
+  compared against the Jekyll 4.3.2 ground truth in `test/battletest/`).

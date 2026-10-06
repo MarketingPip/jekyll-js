@@ -42,9 +42,10 @@ paginator shape (`jekyll-paginate`), front-matter defaults
 Posts, drafts, pages, collections (output true/false, sorting, permalinks,
 `site.documents`), pagination, excerpts, `site.data`, static files,
 front-matter `defaults:`, Sass pipeline, `{% highlight %}`,
-`{% link %}`/`{% post_url %}`, SEO/feed/sitemap/redirect plugins,
+`{% link %}`/`{% post_url %}`, `{% include_cached %}` (jekyll-include-cache),
+SEO/feed/sitemap/redirect plugins,
 timezone-correct dates, `permalink_style` (pretty/date/none/ordinal),
-`exclude`/`include` config, nested pages.
+`exclude`/`include` config, nested pages, front-matter-less files as static.
 
 ## Known gaps
 

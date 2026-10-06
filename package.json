@@ -14,6 +14,7 @@
   },
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/.bin/jest --silent=false",
+    "oracle": "node test/oracle/harness.js",
     "build": "esbuild src/browser/index.js --bundle --platform=browser --format=iife --outfile=dist/jekyll-engine.js --minify && esbuild src/browser/sass.js --bundle --platform=browser --format=iife --outfile=dist/sass-plugin.js --minify && esbuild src/browser/highlight.js --bundle --platform=browser --format=iife --outfile=dist/highlight-plugin.js --minify",
     "build:playground": "npm run build && cp dist/jekyll-engine.js playground/dist/ && cp dist/sass-plugin.js playground/dist/ && cp dist/highlight-plugin.js playground/dist/"
   },

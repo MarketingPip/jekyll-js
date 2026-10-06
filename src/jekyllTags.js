@@ -569,6 +569,72 @@ export function registerJekyllExtensions(liquidEngine, opts = {}) {
   registerPostUrlTag(liquidEngine);
   registerSeoTag(liquidEngine);
   registerFeedMetaTag(liquidEngine);
+  registerIncludeCachedTag(liquidEngine, opts);
   registerPluginStubs(liquidEngine);
   registerFilterFixes(liquidEngine);
+}
+
+// ─── include_cached tag ─────────────────────────────────────────────────────
+// {% include_cached file.html param="value" %} — from jekyll-include-cache.
+// Renders identically to {% include %}; caching is a performance detail.
+// This unblocks minimal-mistakes, just-the-docs, and chirpy (3 top themes).
+function registerIncludeCachedTag(engine, opts = {}) {
+  // opts.getInclude should be a function(filename) => content or null
+  // If not provided, we try to use the engine's FS directly.
+  engine.registerTag('include_cached', {
+    parse(tagToken) {
+      // Parse: filename.html key="value" key2=var
+      // LiquidJS tokenizes args; we need to extract filename and params
+      const args = tagToken.args || '';
+      // Simple parse: first token is filename, rest are key=value
+      const parts = args.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
+      this.file = parts[0] ? parts[0].replace(/^["']|["']$/g, '') : '';
+      this.params = {};
+      for (let i = 1; i < parts.length; i++) {
+        const m = parts[i].match(/^(\w+)=(.*)$/);
+        if (m) {
+          this.params[m[1]] = m[2];
+        }
+      }
+    },
+    async render(ctx) {
+      // Get the include content via opts.getInclude or fallback
+      let content = null;
+      if (opts.getInclude) {
+        content = opts.getInclude(this.file);
+      }
+      if (!content) {
+        // Try via LiquidJS's FS if available
+        // For now, throw a helpful error
+        throw new Error(
+          `include_cached: Could not find include '${this.file}'. ` +
+          `Make sure _includes/${this.file} exists.`
+        );
+      }
+      // Build include scope with params
+      const includeScope = {};
+      for (const [k, v] of Object.entries(this.params)) {
+        // Evaluate the value (could be a string literal or variable)
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+          includeScope[k] = v.slice(1, -1);
+        } else {
+          // Try as variable lookup, fallback to raw
+          try {
+            includeScope[k] = ctx.get([v]) ?? v;
+          } catch {
+            includeScope[k] = v;
+          }
+        }
+      }
+      // Render the include with the scope
+      // We need to push the include variable onto the context
+      ctx.push({ include: includeScope });
+      try {
+        const result = await engine.parseAndRender(content, ctx.getAll());
+        return result;
+      } finally {
+        ctx.pop();
+      }
+    },
+  });
 }

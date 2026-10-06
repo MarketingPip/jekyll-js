@@ -555,7 +555,15 @@ export class JekyllEngine {
     // FIX: register all Jekyll-specific tags (highlight, link, post_url,
     // seo/feed_meta stubs) and filter fixes (to_integer float truncation)
     // that LiquidJS either lacks or gets subtly wrong.
-    registerJekyllExtensions(this.liquidEngine, { highlighter: options.highlighter });
+    registerJekyllExtensions(this.liquidEngine, {
+      highlighter: options.highlighter,
+      getInclude: (filename) => {
+        const cleanFile = this._resolveVfsPath(`_includes/${filename}`);
+        // Also try without _includes/ prefix
+        const altFile = this._resolveVfsPath(filename);
+        return this.vfsTemplates[cleanFile] ?? this.vfsTemplates[altFile] ?? null;
+      },
+    });
     if (options.vfs) this.useVFS(options.vfs);
   }
 
@@ -1091,9 +1099,21 @@ export class JekyllEngine {
       // FIX (nested pages): Jekyll renders any .md/.markdown/.html/.liquid
       // file as a page, regardless of directory nesting. Previously only
       // top-level files were treated as pages.
+      //
+      // FIX (front matter required): Real Jekyll (reader.rb) only treats
+      // files WITH a YAML front matter block as convertible documents.
+      // A .md file without front matter (e.g., CHANGELOG.md, README.md)
+      // is a static file, not a page. We check for the `---` marker.
       if (/\.(md|markdown|html|liquid)$/i.test(path)) {
-        this._rootPages.push({ path, content });
-        continue;
+        const hasFrontMatter = content.startsWith('---\n') || content.startsWith('---\r\n');
+        if (hasFrontMatter) {
+          this._rootPages.push({ path, content });
+        } else {
+          // Treat as static file (will be copied as-is)
+          // Static files are handled in the "anything else" branch below,
+          // so we fall through by not continuing here.
+        }
+        if (hasFrontMatter) continue;
       }
 
       // FIX (site.static_files was entirely unimplemented): anything

@@ -1,0 +1,70 @@
+<h1>The Cayman theme</h1>
+<p><a href="https://github.com/pages-themes/cayman/actions/workflows/ci.yaml"><img src="https://github.com/pages-themes/cayman/actions/workflows/ci.yaml/badge.svg" alt=".github/workflows/ci.yaml"></a> <a href="https://badge.fury.io/rb/jekyll-theme-cayman"><img src="https://badge.fury.io/rb/jekyll-theme-cayman.svg" alt="Gem Version"></a></p>
+<p><em>Cayman is a Jekyll theme for GitHub Pages. You can <a href="http://pages-themes.github.io/cayman">preview the theme to see what it looks like</a>, or even <a href="#usage">use it today</a>.</em></p>
+<p><img src="thumbnail.png" alt="Thumbnail of Cayman"></p>
+<h2>Usage</h2>
+<p>To use the Cayman theme:</p>
+<ol>
+<li><p>Add the following to your site&#39;s <code class="language-plaintext highlighter-rouge">_config.yml</code>:</p>
+<figure class="highlight"><pre><code class="language-yml highlighter-rouge">remote_theme: pages-themes/cayman@v0.2.0
+plugins:
+- jekyll-remote-theme # add this line to the plugins list if you already have one</code></pre></figure></li>
+<li><p>Optionally, if you&#39;d like to preview your site on your computer, add the following to your site&#39;s <code class="language-plaintext highlighter-rouge">Gemfile</code>:</p>
+<figure class="highlight"><pre><code class="language-ruby highlighter-rouge">gem "github-pages", group: :jekyll_plugins</code></pre></figure></li>
+</ol>
+<h2>Customizing</h2>
+<h3>Configuration variables</h3>
+<p>Cayman will respect the following variables, if set in your site&#39;s <code class="language-plaintext highlighter-rouge">_config.yml</code>:</p>
+<figure class="highlight"><pre><code class="language-yml highlighter-rouge">title: [The title of your site]
+description: [A short description of your site's purpose]</code></pre></figure><p>Additionally, you may choose to set the following optional variables:</p>
+<figure class="highlight"><pre><code class="language-yml highlighter-rouge">show_downloads: ["true" or "false" (unquoted) to indicate whether to provide a download URL]
+google_analytics: [Your Google Analytics tracking ID]</code></pre></figure><h3>Stylesheet</h3>
+<p>If you&#39;d like to add your own custom styles:</p>
+<ol>
+<li>Create a file called <code class="language-plaintext highlighter-rouge">/assets/css/style.scss</code> in your site</li>
+<li>Add the following content to the top of the file, exactly as shown:<figure class="highlight"><pre><code class="language-scss highlighter-rouge">---
+---
+
+@import "jekyll-theme-cayman";</code></pre></figure></li>
+<li>Add any custom CSS (or Sass, including imports) you&#39;d like immediately after the <code class="language-plaintext highlighter-rouge">@import</code> line</li>
+</ol>
+<p><em>Note: If you&#39;d like to change the theme&#39;s Sass variables, you must set new values before the <code class="language-plaintext highlighter-rouge">@import</code> line in your stylesheet.</em></p>
+<h3>Layouts</h3>
+<p>If you&#39;d like to change the theme&#39;s HTML layout:</p>
+<ol>
+<li>For some changes such as a custom <code class="language-plaintext highlighter-rouge">favicon</code>, you can add custom files in your local <code class="language-plaintext highlighter-rouge">_includes</code> folder. The files <a href="https://github.com/pages-themes/cayman/tree/master/_includes">provided with the theme</a> provide a starting point and are included by the <a href="https://github.com/pages-themes/cayman/blob/master/_layouts/default.html">original layout template</a>.</li>
+<li>For more extensive changes, <a href="https://github.com/pages-themes/cayman/blob/master/_layouts/default.html">copy the original template</a> from the theme&#39;s repository<br />(<em>Pro-tip: click &quot;raw&quot; to make copying easier</em>)</li>
+<li>Create a file called <code class="language-plaintext highlighter-rouge">/_layouts/default.html</code> in your site</li>
+<li>Paste the default layout content copied in the first step</li>
+<li>Customize the layout as you&#39;d like</li>
+</ol>
+<h3>Customizing Google Analytics code</h3>
+<p>Google has released several iterations to their Google Analytics code over the years since this theme was first created. If you would like to take advantage of the latest code, paste it into <code class="language-plaintext highlighter-rouge">_includes/head-custom-google-analytics.html</code> in your Jekyll site.</p>
+<h3>Overriding GitHub-generated URLs</h3>
+<p>Templates often rely on URLs supplied by GitHub such as links to your repository or links to download your project. If you&#39;d like to override one or more default URLs:</p>
+<ol>
+<li>Look at <a href="https://github.com/pages-themes/cayman/blob/master/_layouts/default.html">the template source</a> to determine the name of the variable. It will be in the form of ``.</li>
+<li>Specify the URL that you&#39;d like the template to use in your site&#39;s <code class="language-plaintext highlighter-rouge">_config.yml</code>. For example, if the variable was <code class="language-plaintext highlighter-rouge">site.github.url</code>, you&#39;d add the following:<figure class="highlight"><pre><code class="language-yml highlighter-rouge">github:
+  zip_url: http://example.com/download.zip
+  another_url: another value</code></pre></figure></li>
+<li>When your site is built, Jekyll will use the URL you specified, rather than the default one provided by GitHub.</li>
+</ol>
+<p><em>Note: You must remove the <code class="language-plaintext highlighter-rouge">site.</code> prefix, and each variable name (after the <code class="language-plaintext highlighter-rouge">github.</code>) should be indent with two space below <code class="language-plaintext highlighter-rouge">github:</code>.</em></p>
+<p>For more information, see <a href="https://jekyllrb.com/docs/variables/">the Jekyll variables documentation</a>.</p>
+<h2>Roadmap</h2>
+<p>See the <a href="https://github.com/pages-themes/cayman/issues">open issues</a> for a list of proposed features (and known issues).</p>
+<h2>Project philosophy</h2>
+<p>The Cayman theme is intended to make it quick and easy for GitHub Pages users to create their first (or 100th) website. The theme should meet the vast majority of users&#39; needs out of the box, erring on the side of simplicity rather than flexibility, and provide users the opportunity to opt-in to additional complexity if they have specific needs or wish to further customize their experience (such as adding custom CSS or modifying the default layout). It should also look great, but that goes without saying.</p>
+<h2>Contributing</h2>
+<p>Interested in contributing to Cayman? We&#39;d love your help. Cayman is an open source project, built one contribution at a time by users like you. See <a href="docs/CONTRIBUTING.md">the CONTRIBUTING file</a> for instructions on how to contribute.</p>
+<h3>Previewing the theme locally</h3>
+<p>If you&#39;d like to preview the theme locally (for example, in the process of proposing a change):</p>
+<ol>
+<li>Clone down the theme&#39;s repository (<code class="language-plaintext highlighter-rouge">git clone https://github.com/pages-themes/cayman</code>)</li>
+<li><code class="language-plaintext highlighter-rouge">cd</code> into the theme&#39;s directory</li>
+<li>Run <code class="language-plaintext highlighter-rouge">script/bootstrap</code> to install the necessary dependencies</li>
+<li>Run <code class="language-plaintext highlighter-rouge">bundle exec jekyll serve</code> to start the preview server</li>
+<li>Visit <a href="http://localhost:4000"><code class="language-plaintext highlighter-rouge">localhost:4000</code></a> in your browser to preview the theme</li>
+</ol>
+<h3>Running tests</h3>
+<p>The theme contains a minimal test suite, to ensure a site with the theme would build successfully. To run the tests, simply run <code class="language-plaintext highlighter-rouge">script/cibuild</code>. You&#39;ll need to run <code class="language-plaintext highlighter-rouge">script/bootstrap</code> once before the test script will work.</p>
