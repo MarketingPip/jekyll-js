@@ -14,26 +14,20 @@
  * Every assertion is grounded in what real Jekyll actually produced,
  * verified by reading testsite/_site/* directly.
  */
-import fs from 'fs';
+import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { JekyllEngine } from '../engine.js';
+import { JekyllEngine } from '../../engine.js';
+import { readDirToVFS } from '../../fs-vfs.js';
+import * as sass from 'sass';
+import hljs from 'highlight.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MINIMA = path.join(__dirname, '..', 'battletest', 'minima-theme');
-const SITE = path.join(__dirname, '..', 'battletest', 'testsite-source');
-const GROUND_TRUTH = path.join(__dirname, '..', 'battletest', 'ground-truth-site');
+const MINIMA = path.join(__dirname, '../..', 'battletest', 'minima-theme');
+const SITE = path.join(__dirname, '../..', 'battletest', 'testsite-source');
+const GROUND_TRUTH = path.join(__dirname, '../..', 'battletest', 'ground-truth-site');
 
-function walk(dir, base, vfs) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const skip = ['_site', '.git', '.sass-cache', '.jekyll-cache', 'Gemfile', 'Gemfile.lock'];
-    if (skip.includes(entry.name)) continue;
-    const full = path.join(dir, entry.name);
-    const rel = base ? `${base}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) walk(full, rel, vfs);
-    else vfs[rel] = fs.readFileSync(full, 'utf8');
-  }
-}
+const BATTLE_IGNORE = ['_site', '.git', '.sass-cache', '.jekyll-cache', 'Gemfile', 'Gemfile.lock'];
 
 function readGroundTruth(file) {
   return fs.readFileSync(path.join(GROUND_TRUTH, file), 'utf8');
@@ -42,10 +36,11 @@ function readGroundTruth(file) {
 let engine, results, byPermalink;
 
 beforeAll(async () => {
-  const vfs = {};
-  walk(MINIMA, '', vfs);
-  walk(SITE, '', vfs);
-  engine = new JekyllEngine({ vfs });
+  const vfs = {
+    ...readDirToVFS(MINIMA, { fs, ignore: BATTLE_IGNORE }),
+    ...readDirToVFS(SITE, { fs, ignore: BATTLE_IGNORE }),
+  };
+  engine = new JekyllEngine({ vfs, sass, highlighter: hljs });
   results = await engine.build();
   byPermalink = Object.fromEntries(results.map((r) => [r.permalink, r.content]));
 }, 30000);

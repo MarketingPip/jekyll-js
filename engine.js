@@ -20,6 +20,23 @@ import { isSassAsset, compileSassAsset } from './assetsPipeline.js';
 
 const noop = () => {};
 
+/** Deep-merge two plain objects (override wins); mirrors Jekyll's Utils.deep_merge_hashes. */
+function deepMerge(base, override) {
+  const out = { ...(base || {}) };
+  for (const [k, v] of Object.entries(override || {})) {
+    const bv = out[k];
+    if (
+      v && typeof v === 'object' && !Array.isArray(v) &&
+      bv && typeof bv === 'object' && !Array.isArray(bv)
+    ) {
+      out[k] = deepMerge(bv, v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 // -------------------------------------------------------------
 // Internal slug helper, used for permalink generation.
 //
@@ -273,7 +290,9 @@ function generateCollectionPermalink(frontMatter, collectionName, relPath, colle
     .replace(/:collection/g, collectionName)
     .replace(/:path/g, pathSlug)
     .replace(/:name/g, slugify(base))
-    .replace(/:title/g, slugify(base));
+    // FIX (:title used the filename, not the slug): real Jekyll's
+    // UrlDrop#title is slugified front-matter `slug:` else the basename.
+    .replace(/:title/g, slugify(frontMatter.slug || base));
 
   path = path.replace(/\/+/g, '/');
   if (!path.startsWith('/')) path = '/' + path;
@@ -361,6 +380,20 @@ function buildPaginators(allPosts, perPage, paginatePathPattern, templateUrl) {
 }
 
 export class JekyllEngine {
+  /**
+   * @param {Object} options
+   * @param {Object} options.vfs - virtual filesystem: { "path": "content" }
+   * @param {Function} [options.logger] - (msg, level) log sink
+   * @param {Function} [options.stdout] - stdout sink
+   * @param {Object} [options.sass] - optional Sass compiler (dart-sass).
+   *   Required only when the site contains .scss/.sass files. In Node:
+   *   `import * as sass from 'sass'`; in the browser: load
+   *   `dist/sass-plugin.js` and pass `window.JekyllSass`.
+   * @param {Object} [options.highlighter] - optional syntax highlighter
+   *   (highlight.js). Required only when the site uses {% highlight %}.
+   *   In Node: `import hljs from 'highlight.js'`; in the browser: load
+   *   `dist/highlight-plugin.js` and pass `window.JekyllHighlight`.
+   */
   constructor(options = {}) {
     this.options = {
       logger: options.logger || noop,
@@ -440,7 +473,7 @@ export class JekyllEngine {
     // FIX: register all Jekyll-specific tags (highlight, link, post_url,
     // seo/feed_meta stubs) and filter fixes (to_integer float truncation)
     // that LiquidJS either lacks or gets subtly wrong.
-    registerJekyllExtensions(this.liquidEngine);
+    registerJekyllExtensions(this.liquidEngine, { highlighter: options.highlighter });
     if (options.vfs) this.useVFS(options.vfs);
   }
 
@@ -519,12 +552,9 @@ export class JekyllEngine {
         try {
           this._config = yaml.load(content) || {};
         } catch (e) {
-          // FIX (silent swallowing): a typo'd _config.yml used to build
-          // "successfully" with an empty config and no hint why.
-          this.options.logger(
-            `_config.yml: YAML parse error (${e.message}) -- using empty config`,
-            'warn'
-          );
+          // Jekyll parity (configuration.rb: read_config_file raises on
+          // malformed YAML): a broken config is fatal, not warn-and-continue.
+          throw new Error(`_config.yml: YAML parse error (${e.message})`);
         }
         break;
       }
@@ -550,9 +580,9 @@ export class JekyllEngine {
           const name = path.replace('_data/', '').replace(/\.[^/.]+$/, '');
           this._data[name] = yaml.load(content);
         } catch (e) {
-          // FIX (silent swallowing): a broken _data file used to vanish
-          // without a trace, leaving site.data.name undefined.
-          this.options.logger(`_data/${path.slice('_data/'.length)}: YAML parse error (${e.message}) -- skipped`, 'warn');
+          // Jekyll parity (data_reader.rb: read_data_file has no rescue):
+          // a broken _data file is fatal.
+          throw new Error(`_data/${path.slice('_data/'.length)}: YAML parse error (${e.message})`);
         }
         continue;
       }
@@ -560,12 +590,25 @@ export class JekyllEngine {
       // FIX (.markdown posts): Jekyll accepts both `.md` and `.markdown`
       // as post file extensions. The original `parsePostFilename` only
       // matched `.md`.
-      if (path.includes('_posts/')) {
-        const postsIndex = path.indexOf('_posts/');
-        const filename = path.slice(postsIndex + '_posts/'.length);
+      // FIX (drafts): real Jekyll only reads _drafts/ when `show_drafts`
+      // is set; drafts are otherwise never posts.
+      const isDraft = path.includes('_drafts/');
+      if (path.includes('_posts/') || (isDraft && this._config.show_drafts)) {
+        const dirTag = isDraft ? '_drafts/' : '_posts/';
+        const filename = path.slice(path.indexOf(dirTag) + dirTag.length);
         const parsed = parsePostFilename(filename);
         try {
-          const { attributes, body } = fm(content);
+          const { attributes, body } = this._parseFrontMatter(path, content, isDraft ? 'drafts' : 'posts');
+
+          // FIX (published:false / future posts): real Jekyll's
+          // PostReader#read_publishable drops both at READ time
+          // (Publisher#publish?), unless `unpublished` / `future: true`.
+          if (attributes.published === false && !this._config.unpublished) continue;
+          const postDate = attributes.date || parsed?.date;
+          if (!this._config.future && postDate && new Date(postDate) > new Date()) {
+            this.options.logger(`Skipping ${path}: future date`, 'info');
+            continue;
+          }
 
           const postCategories = getPostCategories(attributes, path);
           const postTags = getPostTags(attributes);
@@ -608,9 +651,9 @@ export class JekyllEngine {
             _excerpt: parseMarkdown(extractExcerpt(body, excerptSeparator)),
           });
         } catch (e) {
-          // FIX (silent swallowing): a post with broken front matter used
-          // to vanish from the build with no hint why.
-          this.options.logger(`Skipping ${path}: front-matter parse error (${e.message})`, 'warn');
+          // YAML errors are handled by _parseFrontMatter (warn-and-keep);
+          // this guards unexpected non-YAML failures during post assembly.
+          this.options.logger(`Skipping ${path}: ${e.message}`, 'warn');
         }
         continue;
       }
@@ -629,7 +672,15 @@ export class JekyllEngine {
         const prefix = `_${collectionName}/`;
         const relPath = path.slice(path.indexOf(prefix) + prefix.length);
         try {
-          const { attributes, body } = fm(content);
+          const { attributes, body } = this._parseFrontMatter(path, content, collectionName);
+          // FIX (published:false): real Jekyll's Collection#read_document
+          // keeps the doc only `if site.unpublished || doc.published?`.
+          if (attributes.published === false && !this._config.unpublished) continue;
+          // FIX (collection doc dates): real Jekyll's Document#date falls
+          // back from front matter to the filename (DATE_FILENAME_MATCHER)
+          // to site.time. parsePostFilename covers the dated-filename case.
+          const fileBase = relPath.slice(relPath.lastIndexOf('/') + 1);
+          const docDate = attributes.date || parsePostFilename(fileBase)?.date || new Date();
           const permalink = generateCollectionPermalink(
             attributes,
             collectionName,
@@ -644,10 +695,12 @@ export class JekyllEngine {
             _body: body,
             _permalink: permalink,
             _relPath: relPath,
+            _date: docDate,
           });
         } catch (e) {
-          // FIX (silent swallowing): see the post branch above.
-          this.options.logger(`Skipping ${path}: front-matter parse error (${e.message})`, 'warn');
+          // As above: YAML is handled by _parseFrontMatter; this is the
+          // safety net for unexpected failures during doc assembly.
+          this.options.logger(`Skipping ${path}: ${e.message}`, 'warn');
         }
         continue;
       }
@@ -701,7 +754,160 @@ export class JekyllEngine {
       this._collections.posts.sort((a, b) => new Date(b._date) - new Date(a._date));
     }
 
+    // FIX (collection docs were unsorted): real Jekyll's Collection#read
+    // ends with sort_docs! -> Document#<=> (date ascending, path
+    // tie-break). Undated docs compare equal (Jekyll falls back to
+    // site.time for all of them), so the path tie-break decides there.
+    const now = Date.now();
+    for (const [name, pages] of Object.entries(this._collections)) {
+      if (name === 'posts') continue;
+      const t = (p) => (p._date ? new Date(p._date).getTime() : now);
+      pages.sort((a, b) => t(a) - t(b) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    }
+
     return this;
+  }
+
+  // ─── Programmatic VFS API ─────────────────────────────────────────────
+  // Build a site with JS calls instead of a pre-built vfs object:
+  //
+  //   const engine = new JekyllEngine();
+  //   engine.writeFile('_config.yml', 'title: My Site\n');
+  //   engine.writeFile('_layouts/default.html', '<html><body>{{ content }}</body></html>');
+  //   engine.writeFile('index.md', '---\nlayout: default\ntitle: Home\n---\n# Hi\n');
+  //   const pages = await engine.build();
+  //
+  // Each mutation re-ingests the VFS (O(n)); for bulk loads prefer passing
+  // the whole object to the constructor or useVFS() once.
+
+  /** Add or overwrite a single file, then re-ingest the site. */
+  writeFile(path, content) {
+    this.useVFS({ ...this.vfsTemplates, [path]: content });
+    return this;
+  }
+
+  /** Read a single file's content (undefined when absent). */
+  readFile(path) {
+    return this.vfsTemplates[path];
+  }
+
+  /** Remove a single file, then re-ingest the site. */
+  removeFile(path) {
+    const vfs = { ...this.vfsTemplates };
+    delete vfs[path];
+    this.useVFS(vfs);
+    return this;
+  }
+
+  /** List every file path currently in the VFS. */
+  listFiles() {
+    return Object.keys(this.vfsTemplates);
+  }
+
+  /**
+   * Parse front matter the way Jekyll does (convertible.rb:47-53): on a
+   * YAML syntax error, warn and KEEP the document with empty front matter
+   * (Jekyll raises only under `strict_front_matter`). Never skip the file.
+   *
+   * When `type` is given (posts|pages|drafts|<collection name>), matching
+   * front-matter `defaults:` from _config.yml are deep-merged in first —
+   * front matter itself always wins (frontmatter_defaults.rb).
+   */
+  _parseFrontMatter(path, content, type = null) {
+    let attributes;
+    let body;
+    try {
+      ({ attributes, body } = fm(content));
+    } catch (e) {
+      this.options.logger(`YAML Exception reading ${path}: ${e.message}`, 'warn');
+      attributes = {};
+      body = content;
+    }
+    if (type) {
+      attributes = deepMerge(this._frontmatterDefaults(path, type), attributes);
+    }
+    return { attributes, body };
+  }
+
+  // ─── Front-matter defaults (Jekyll parity: frontmatter_defaults.rb) ───
+
+  /** Deprecated singular scope types normalize to their plural forms. */
+  _normalizeDefaultType(type) {
+    return { page: 'pages', post: 'posts', draft: 'drafts' }[type] || type;
+  }
+
+  /** Valid default sets from _config.yml; invalid ones warn and are skipped. */
+  _validDefaultSets() {
+    const sets = this._config.defaults;
+    if (!Array.isArray(sets)) return [];
+    const out = [];
+    for (const set of sets) {
+      const valid = set && typeof set === 'object' && set.values && typeof set.values === 'object';
+      if (!valid) {
+        this.options.logger(
+          `Defaults: an invalid front-matter default set was found: ${JSON.stringify(set)}`,
+          'warn'
+        );
+        continue;
+      }
+      out.push(
+        set.scope && set.scope.type
+          ? { ...set, scope: { ...set.scope, type: this._normalizeDefaultType(set.scope.type) } }
+          : set
+      );
+    }
+    return out;
+  }
+
+  /** Does a defaults scope apply to this path+type? (no scope = applies). */
+  _defaultScopeApplies(scope, path, type) {
+    if (!scope) return true;
+    if (scope.type && scope.type !== type) return false;
+    const scopePath = scope.path;
+    if (typeof scopePath !== 'string' || scopePath === '') return true;
+    if (scopePath.includes('*')) {
+      const re = new RegExp(
+        '^' + scopePath.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$'
+      );
+      return re.test(path);
+    }
+    return path.startsWith(String(scopePath).replace(/^\//, ''));
+  }
+
+  /** Mirrors FrontmatterDefaults#has_precedence?: longer path wins; on a tie, a type-scoped set wins; later sets win ties. */
+  _defaultHasPrecedence(oldScope, newScope) {
+    if (!oldScope) return true;
+    const newPath = (newScope && newScope.path) || '';
+    const oldPath = (oldScope && oldScope.path) || '';
+    if (newPath.length !== oldPath.length) return newPath.length >= oldPath.length;
+    if (newScope && newScope.type) return true;
+    return !(oldScope && oldScope.type);
+  }
+
+  /** Collect the merged defaults for a path+type (frontmatter_defaults.rb#all). */
+  _frontmatterDefaults(path, type) {
+    let defaults = {};
+    let oldScope = null;
+    for (const set of this._validDefaultSets()) {
+      if (!this._defaultScopeApplies(set.scope, path, type)) continue;
+      if (this._defaultHasPrecedence(oldScope, set.scope)) {
+        defaults = deepMerge(defaults, set.values);
+        oldScope = set.scope;
+      } else {
+        defaults = deepMerge(set.values, defaults);
+      }
+    }
+    return defaults;
+  }
+
+  /** Derive the defaults type for a path (used where the caller doesn't know it). */
+  _docTypeForPath(path) {
+    if (path.includes('_posts/')) return 'posts';
+    if (path.includes('_drafts/')) return 'drafts';
+    for (const name of Object.keys(this._collectionsConfig || {})) {
+      if (path.startsWith(`_${name}/`)) return name;
+    }
+    return 'pages';
   }
 
   // FIX (#9 in review -- site.pages didn't exist):
@@ -711,7 +917,7 @@ export class JekyllEngine {
   // collections are, with front matter parsed and a `url` resolved.
   _buildRootPagesSummary() {
     return this._rootPages.map((p) => {
-      const { attributes, body } = fm(p.content);
+      const { attributes, body } = this._parseFrontMatter(p.path, p.content, 'pages');
       const url =
         attributes.permalink ||
         (p.path === 'index.md' || p.path === 'index.markdown' || p.path === 'index.html' ? '/' : `/${p.path.replace(/\.[^/.]+$/, '')}/`);
@@ -798,11 +1004,15 @@ export class JekyllEngine {
         return [
           name,
           pages.map((p) => {
-            const { _body, _permalink, _relPath, content: _rawContent, ...rest } = p;
+            const { _body, _permalink, _relPath, _date, content: _rawContent, ...rest } = p;
             return {
               ...rest,
               url: rest.permalink || _permalink || `/${name}/${(_relPath || p.path).replace(/\.[^/.]+$/, '')}/`,
               path: p.path,
+              // FIX (collection docs had no date): real Jekyll's
+              // Document#date always resolves (front matter -> filename ->
+              // site.time); _date already carries that at scan time.
+              date: rest.date || _date,
               content: _body,
               collection: name,
             };
@@ -830,6 +1040,10 @@ export class JekyllEngine {
         static_files: this._staticFiles, // FIX (site.static_files)
         related_posts: relatedPosts, // FIX (site.related_posts)
         ...mappedCollections,
+        // FIX (site.documents was entirely unimplemented): real Jekyll's
+        // Site#documents is every doc in every collection (posts included,
+        // output:false included, published:false already filtered at read).
+        documents: Object.values(mappedCollections).flat(),
       },
     };
   }
@@ -857,7 +1071,7 @@ export class JekyllEngine {
       visited.add(layoutName);
       const layoutContent = this._resolveLayout(layoutName);
       if (!layoutContent) break;
-      const { attributes: fmLayout, body: layoutBody } = fm(layoutContent);
+      const { attributes: fmLayout, body: layoutBody } = this._parseFrontMatter(`_layouts/${layoutName}`, layoutContent);
       html = await this.liquidEngine.parseAndRender(layoutBody, { ...ctx, content: html });
       layoutName = fmLayout.layout;
     }
@@ -865,7 +1079,7 @@ export class JekyllEngine {
   }
 
   async _renderPage(path, content, isPost = false, postMeta = null, paginator = null, overridePermalink = null) {
-    const { attributes, body } = fm(content);
+    const { attributes, body } = this._parseFrontMatter(path, content, this._docTypeForPath(path));
     // FIX (site.related_posts): pass the current post through so
     // _buildSiteContext can compute related_posts contextually, exactly
     // like real Jekyll scopes `site.related_posts` to whichever
@@ -1021,6 +1235,14 @@ export class JekyllEngine {
       if (!shouldOutput) continue;
 
       for (const page of pages) {
+        // FIX (future collection docs): real Jekyll READS them (they stay
+        // in site.<collection>) but never WRITES them (Document#write? ->
+        // Publisher#publish?), unless `future: true`. (Future posts never
+        // reach here -- PostReader#read_publishable already dropped them.)
+        if (!this._config.future && page._date && new Date(page._date) > new Date()) {
+          this.options.logger(`Skipping ${page.path}: future date`, 'info');
+          continue;
+        }
         this.options.logger(`Processing collection item -> ${page.path}`, 'info');
         const result = await this._renderPage(page.path, page.content, true, page);
         results.push(result);
@@ -1033,9 +1255,28 @@ export class JekyllEngine {
     // FIX (SCSS assets pipeline): compile all tracked SCSS/Sass assets.
     // Done after template rendering so the full VFS (including any
     // theme _sass/ partials) is already loaded.
+    //
+    // Sass is an optional plugin, not a core dependency: the compiler is
+    // provided via the `sass` engine option so the core bundle stays
+    // tree-shakeable and browsers can lazy-load the dart-sass chunk only
+    // when the site actually contains Sass files.
+    if (this._sassAssets.length > 0 && !this.options.sass) {
+      const files = this._sassAssets.map((a) => a.path).join(', ');
+      throw new Error(
+        `Site contains Sass files (${files}) but no Sass compiler was provided. ` +
+          `Pass one via \`new JekyllEngine({ sass })\` — \`import * as sass from 'sass'\` ` +
+          `in Node, or load dist/sass-plugin.js (sets window.JekyllSass) in the browser.`
+      );
+    }
     for (const asset of this._sassAssets) {
       this.options.logger(`Compiling Sass: ${asset.path}`, 'info');
-      const compiled = compileSassAsset(asset.path, asset.content, this.vfsTemplates, this._config);
+      const compiled = compileSassAsset(
+        asset.path,
+        asset.content,
+        this.vfsTemplates,
+        this._config,
+        this.options.sass
+      );
       // FIX (silent Sass failures): the compile error used to hide inside
       // a CSS comment. The comment is still emitted (playground-friendly),
       // but now it also warns loudly so a broken stylesheet can't be missed.

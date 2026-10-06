@@ -1,4 +1,4 @@
-import { JekyllEngine } from '../engine.js';
+import { JekyllEngine } from '../../engine.js';
 
 describe('site.static_files', () => {
   const vfs = {
