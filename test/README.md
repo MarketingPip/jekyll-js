@@ -22,7 +22,9 @@ Suite layout (run everything with `npm test` from the repo root):
   `{% link %}`/`{% post_url %}` failures, warning behavior, marked
   isolation, highlight linenos, SCSS entry points), and
   `frontmatter-defaults.test.js` (front-matter `defaults:` — scope
-  path/type matching, precedence, deep merge, invalid-set warnings).
+  path/type matching, precedence, deep merge, invalid-set warnings), and
+  `where-exp.test.js` (the `where_exp` filter — LiquidJS's native
+  implementation locked in against regressions).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,
