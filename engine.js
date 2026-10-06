@@ -21,6 +21,15 @@ import { isFeedEnabled, generateFeeds } from './jekyllFeed.js';
 
 const noop = () => {};
 
+// Jekyll 4.3.2 defaults (lib/jekyll/configuration.rb). User `exclude:`/`include:`
+// in _config.yml are MERGED with these, not replacements.
+const DEFAULT_EXCLUDES = [
+  '.sass-cache/', '.jekyll-cache/', 'gemfiles/',
+  'Gemfile', 'Gemfile.lock', 'node_modules/',
+  'vendor/bundle/', 'vendor/cache/', 'vendor/gems/', 'vendor/ruby/',
+];
+const DEFAULT_INCLUDES = ['.htaccess'];
+
 /** Deep-merge two plain objects (override wins); mirrors Jekyll's Utils.deep_merge_hashes. */
 function deepMerge(base, override) {
   const out = { ...(base || {}) };
@@ -409,6 +418,9 @@ export class JekyllEngine {
     this._data = {};
     this._collections = {};
     this._rootPages = [];
+    // JS Plugin API state
+    this._hooks = {};       // "owner:event" -> [fn]
+    this._generators = [];  // [fn(site)]
     this._staticFiles = [];
     this._sassAssets = [];
     this.vfsTemplates = {};
@@ -531,6 +543,151 @@ export class JekyllEngine {
     }
   }
 
+  // ============================================================
+  // JS Plugin API
+  // Mirrors Jekyll's Ruby plugin surface (Hooks, Generators, Tags,
+  // Filters) so agents/humans can write plugins in JS as naturally
+  // as the Ruby originals.
+  // ============================================================
+
+  /**
+   * Register a plugin function. Called with the engine instance.
+   * @param {Function} pluginFn - (engine) => void
+   */
+  use(pluginFn) {
+    pluginFn(this);
+    return this;
+  }
+
+  /**
+   * Register a hook (mirrors Jekyll::Hooks.register).
+   * @param {string} owner - 'site', 'pages', 'posts', etc.
+   * @param {string} event - 'post_read', 'post_init', 'pre_render', etc.
+   * @param {Function} fn - hook function
+   */
+  registerHook(owner, event, fn) {
+    const key = `${owner}:${event}`;
+    (this._hooks[key] ||= []).push(fn);
+    return this;
+  }
+
+  /**
+   * Trigger hooks (mirrors Jekyll::Hooks.trigger).
+   */
+  triggerHook(owner, event, ...args) {
+    const key = `${owner}:${event}`;
+    for (const fn of this._hooks[key] || []) {
+      fn(...args);
+    }
+  }
+
+  /**
+   * Register a Liquid tag (mirrors Jekyll's Liquid::Tag subclass).
+   */
+  registerTag(name, fn) {
+    // LiquidJS custom tags: simple function-based tags
+    const liquidEngine = this.liquidEngine;
+    liquidEngine.registerTag(name, {
+      parse(tagToken) {
+        this.text = tagToken.args;
+      },
+      async render(ctx) {
+        const text = await liquidEngine.evalValue(this.text, ctx);
+        return fn(String(text ?? ''));
+      },
+    });
+    return this;
+  }
+
+  /**
+   * Register a Liquid filter.
+   */
+  registerFilter(name, fn) {
+    this.liquidEngine.registerFilter(name, fn);
+    return this;
+  }
+
+  /**
+   * Register a generator (mirrors Jekyll::Generator).
+   * @param {Function} fn - (site) => void
+   */
+  registerGenerator(fn) {
+    this._generators.push(fn);
+    return this;
+  }
+
+  /**
+   * Create a new Page (mirrors Jekyll::Page subclass).
+   * @param {Object} opts - { dir, name, layout, content }
+   */
+  createPage({ dir = '', name, layout = null, content = '' }) {
+    const path = dir ? `${dir}/${name}` : name;
+    const page = {
+      path,
+      dir,
+      name,
+      content,
+      data: {},
+    };
+    if (layout) page.data.layout = layout;
+    return page;
+  }
+
+  /**
+   * Check if a file exists in the VFS (mirrors File.exist?).
+   */
+  fileExists(path) {
+    return path in this.vfsTemplates;
+  }
+
+  /**
+   * Logger (mirrors Jekyll.logger).
+   */
+  get logger() {
+    const log = this.options.logger;
+    return {
+      warn: (msg) => log(msg, 'warn'),
+      info: (msg) => log(msg, 'info'),
+      error: (msg) => log(msg, 'error'),
+    };
+  }
+
+  /**
+   * Utilities (mirrors Jekyll::Utils).
+   */
+  get utils() {
+    return { slugify };
+  }
+
+  /**
+   * Build the mutable `site` object passed to hooks and generators.
+   * Mirrors Jekyll's SiteDrop with Ruby-like .data and .date accessors.
+   */
+  _buildPluginSite() {
+    const collections = {};
+    for (const [name, docs] of Object.entries(this._collections)) {
+      collections[name] = {
+        docs: docs.map((doc) => {
+          const wrapped = { ...doc };
+          wrapped.data = wrapped; // doc.data.categories === doc.categories
+          wrapped.date = doc._date
+            ? new Date(doc._date)
+            : doc.date
+              ? new Date(doc.date)
+              : null;
+          return wrapped;
+        }),
+      };
+    }
+    return {
+      config: this._config,
+      collections,
+      pages: [...this._rootPages], // mutable; plugins push new pages here
+      data: this._data,
+      source: '/',
+    };
+  }
+
   useVFS(vfs) {
     this._config = {};
     this._layouts = {};
@@ -562,7 +719,26 @@ export class JekyllEngine {
     }
     this._collectionsConfig = normalizeCollectionsConfig(this._config.collections);
 
+    // FIX (exclude/include config): Jekyll's `exclude:` (with defaults from
+    // configuration.rb) skips files/dirs; `include:` forces inclusion,
+    // overriding excludes. Merged (defaults + user), not replaced.
+    const userExclude = this._config.exclude;
+    const userInclude = this._config.include;
+    const toList = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
+    this._excludeList = [...DEFAULT_EXCLUDES, ...toList(userExclude)];
+    this._includeList = [...DEFAULT_INCLUDES, ...toList(userInclude)];
+
     for (const [path, content] of Object.entries(vfs)) {
+      // Infrastructure is never excluded (Jekyll reads these directly,
+      // not via the filtered entry reader).
+      const isInfrastructure =
+        path === '_config.yml' || path === '_config.yaml' ||
+        path.startsWith('_layouts/') || path.startsWith('_includes/') ||
+        path.startsWith('_data/') || path.startsWith('_sass/');
+      if (!isInfrastructure && this._isExcluded(path)) {
+        continue;
+      }
+
       this.vfsTemplates[path] = content;
 
       if (path === '_config.yml' || path === '_config.yaml') {
@@ -814,6 +990,21 @@ export class JekyllEngine {
    * front-matter `defaults:` from _config.yml are deep-merged in first —
    * front matter itself always wins (frontmatter_defaults.rb).
    */
+  /**
+   * Jekyll parity (entry_filter.rb): is this VFS path excluded by the
+   * `exclude:` config (defaults + user)? `include:` overrides.
+   * Matches exact paths and anything under an excluded directory.
+   */
+  _isExcluded(path) {
+    const matches = (list) => list.some((entry) => {
+      const normalized = String(entry).replace(/\/$/, '');
+      return path === normalized || path.startsWith(normalized + '/');
+    });
+    // include wins over exclude
+    if (matches(this._includeList || [])) return false;
+    return matches(this._excludeList || []);
+  }
+
   _parseFrontMatter(path, content, type = null) {
     let attributes;
     let body;
@@ -1094,7 +1285,11 @@ export class JekyllEngine {
       } else if (path === 'index.md' || path === 'index.markdown' || path === 'index.html') {
         localPermalink = '/';
       } else {
-        localPermalink = `/${path.replace(/\.[^/.]+$/, '')}/`;
+        // Strip extension; a trailing /index (nested index.html) becomes
+        // the directory URL, mirroring Jekyll's pretty permalinks.
+        let p = path.replace(/\.[^/.]+$/, '');
+        if (p.endsWith('/index')) p = p.slice(0, -'/index'.length);
+        localPermalink = `/${p}/`;
       }
     }
 
@@ -1162,6 +1357,7 @@ export class JekyllEngine {
     const perPage = parseInt(this._config.paginate, 10);
     if (!this._config.paginate || !Number.isFinite(perPage) || perPage <= 0) return null;
     if (this._rootPages.length === 0) return null;
+    if (!allPosts || allPosts.length === 0) return null;
 
     const rootSummaries = this._buildRootPagesSummary();
     const templateSummary = rootSummaries.find((p) => p.url === '/');
@@ -1189,6 +1385,18 @@ export class JekyllEngine {
     const postsForPagination = this._buildSiteContext().site.posts;
     const pagination = this._computePagination(postsForPagination);
 
+    // JS Plugin API: build the mutable site object, run post_read hooks
+    // (mirrors Jekyll's :site, :post_read), then generators.
+    // Plugins may push new pages to site.pages.
+    const pluginSite = this._buildPluginSite();
+    this.triggerHook('site', 'post_read', pluginSite);
+    for (const gen of this._generators) {
+      gen(pluginSite);
+    }
+    // Pages added by plugins (not already in _rootPages).
+    const rootPaths = new Set(this._rootPages.map((p) => p.path));
+    const pluginPages = pluginSite.pages.filter((p) => !rootPaths.has(p.path));
+
     for (const page of this._rootPages) {
       this.options.logger(`Parsing base layer: ${page.path}`, 'info');
       const isPaginationTemplate = pagination && pagination.templatePath === page.path;
@@ -1199,6 +1407,17 @@ export class JekyllEngine {
         null,
         isPaginationTemplate ? pagination.pagers[0] : null
       );
+      results.push(result);
+      if (this.options.stdout) this.options.stdout(result);
+    }
+
+    // Render pages added by plugins (via site.pages.push in hooks/generators).
+    // page.data is serialized as front matter so layouts and Liquid work.
+    for (const page of pluginPages) {
+      this.options.logger(`Rendering plugin page: ${page.path}`, 'info');
+      const frontMatter = yaml.dump(page.data || {});
+      const fileContent = `---\n${frontMatter}---\n${page.content || ''}`;
+      const result = await this._renderPage(page.path, fileContent);
       results.push(result);
       if (this.options.stdout) this.options.stdout(result);
     }
