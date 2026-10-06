@@ -2,6 +2,9 @@
   "name": "jekyll-engine-fix",
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "jekyll-js": "./bin/jekyll-js.js"
+  },
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/.bin/jest --silent=false",
     "build": "esbuild browser.js --bundle --platform=browser --format=iife --outfile=dist/jekyll-engine.js --minify && esbuild browser-sass.js --bundle --platform=browser --format=iife --outfile=dist/sass-plugin.js --minify && esbuild browser-highlight.js --bundle --platform=browser --format=iife --outfile=dist/highlight-plugin.js --minify"
