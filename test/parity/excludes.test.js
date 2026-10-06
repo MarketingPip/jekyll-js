@@ -15,8 +15,8 @@ describe('exclude config', () => {
     const engine = new JekyllEngine({
       vfs: {
         '_config.yml': 'exclude:\n  - about.md\n',
-        'index.md': '---\n---\n# Home',
-        'about.md': '---\n---\n# About',
+        'index.md': '# Home',
+        'about.md': '# About',
       },
     });
     const pages = await engine.build();
@@ -29,7 +29,7 @@ describe('exclude config', () => {
     const engine = new JekyllEngine({
       vfs: {
         '_config.yml': 'exclude:\n  - Gemfile\n',
-        'index.md': '---\n---\n# Home',
+        'index.md': '# Home',
         'Gemfile': 'source "https://rubygems.org"',
       },
     });
@@ -41,7 +41,7 @@ describe('exclude config', () => {
   test('default excludes apply without config (node_modules)', async () => {
     const engine = new JekyllEngine({
       vfs: {
-        'index.md': '---\n---\n# Home',
+        'index.md': '# Home',
         'node_modules/pkg/index.js': 'console.log("x")',
       },
     });
@@ -54,7 +54,7 @@ describe('exclude config', () => {
     const engine = new JekyllEngine({
       vfs: {
         '_config.yml': 'exclude:\n  - assets\ninclude:\n  - assets/keep.css\n',
-        'index.md': '---\n---\n# Home',
+        'index.md': '# Home',
         'assets/drop.css': 'body {}',
         'assets/keep.css': 'html {}',
       },

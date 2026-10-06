@@ -32,11 +32,9 @@ Suite layout (run everything with `npm test` from the repo root):
   `include-params.test.js` (`{% include %}` with parameters — string/number/variable
   args accessible as `{{ include.name }}`),
   `include-cached.test.js` (`{% include_cached %}` from jekyll-include-cache —
-  renders identically to `{% include %}`),
-  `no-frontmatter.test.js` (`.md` without front matter is a static file,
-  not a page — matches Jekyll's reader.rb), and `nested-layouts.test.js`
+  renders identically to `{% include %}`), and `nested-layouts.test.js`
   (layout chains — a layout with its own `layout:` front matter renders inside-out).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,
-  compared against the Jekyll 4.3.2 ground truth in `test/battletest/`).
+  compared against the Jekyll 4.3.2 ground truth in `battletest/`).

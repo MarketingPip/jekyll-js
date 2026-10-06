@@ -27,8 +27,6 @@ src/
 test/
   unit/                Unit tests (VFS API, etc.)
   parity/              Parity tests vs real Jekyll (official suite conversions + oracle fixtures)
-  integration/         Full engine builds (incl. battletest.test.js vs real theme output)
-  battletest/          Battle-test fixtures: real minima theme + scaffolded site + Jekyll ground truth
   ...
 docs/
   parity.md            Honest parity scoreboard (update every PR!)

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { JekyllEngine } from '../engine.js';
 
-const vfs = JSON.parse(fs.readFileSync('./test/battletest/vfs.json', 'utf8'));
+const vfs = JSON.parse(fs.readFileSync('./battletest/vfs.json', 'utf8'));
 const errors = [];
 
 const engine = new JekyllEngine({
@@ -23,5 +23,5 @@ for (const r of results) {
   out[r.permalink] = r.content;
 }
 
-fs.writeFileSync('./test/battletest/engine-out.json', JSON.stringify(out, null, 2));
+fs.writeFileSync('./battletest/engine-out.json', JSON.stringify(out, null, 2));
 console.log('Engine produced pages:', Object.keys(out).sort().join(', '));
