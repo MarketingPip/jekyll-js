@@ -264,7 +264,7 @@ describe('FIX 9: scss entry points outside assets/', () => {
     const res = await engine.build();
     const css = res.find((r) => r.permalink === '/css/main.css');
     expect(css).toBeDefined();
-    expect(css.content).toContain('color:red');
+    expect(css.content).toContain('color: red');
   });
 
   test('_sass/ files are never emitted as compiled pages', async () => {
