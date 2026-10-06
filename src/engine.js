@@ -18,6 +18,7 @@ import fm from 'front-matter';
 import { registerJekyllExtensions } from './jekyllTags.js';
 import { isSassAsset, compileSassAsset } from './assetsPipeline.js';
 import { isFeedEnabled, generateFeeds } from './jekyllFeed.js';
+import { isSitemapEnabled, generateSitemap } from './jekyllSitemap.js';
 
 const noop = () => {};
 
@@ -796,13 +797,19 @@ export class JekyllEngine {
         }),
       };
     }
-    return {
+    const site = {
       config: this._config,
       collections,
       pages: [...this._rootPages], // mutable; plugins push new pages here
       data: this._data,
       source: '/',
     };
+    // Jekyll parity: site.posts is a shortcut for collections['posts'].docs
+    Object.defineProperty(site, 'posts', {
+      get() { return this.collections.posts?.docs || []; },
+      enumerable: true,
+    });
+    return site;
   }
 
   useVFS(vfs) {
@@ -1652,6 +1659,16 @@ export class JekyllEngine {
         results.push(feedResult);
         if (this.options.stdout) this.options.stdout(feedResult);
       }
+    }
+
+    // FIX (jekyll-sitemap): native sitemap generator, opt-in via
+    // `plugins: [jekyll-sitemap]`. (Opal cannot run the real gem:
+    // it uses regex lookbehind, which Opal 1.8.2 doesn't support.)
+    if (isSitemapEnabled(this._config)) {
+      this.options.logger('Generating sitemap.xml (jekyll-sitemap)...', 'info');
+      const sitemapResult = await generateSitemap(this);
+      results.push(sitemapResult);
+      if (this.options.stdout) this.options.stdout(sitemapResult);
     }
 
     await this._emit('post:build', results);

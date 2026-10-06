@@ -133,7 +133,8 @@ export const FEED_TEMPLATE = `<?xml version="1.0" encoding="utf-8"?>
  * Whether the site opted into jekyll-feed via `_config.yml` `plugins:`.
  */
 export function isFeedEnabled(config) {
-  const plugins = config?.plugins || [];
+  // Jekyll 3.5+ uses `plugins:`; `gems:` is the deprecated alias (still works).
+  const plugins = config?.plugins || config?.gems || [];
   const list = Array.isArray(plugins) ? plugins : [plugins];
   return list.some((p) => p === 'jekyll-feed' || p === 'jekyll_feed');
 }
