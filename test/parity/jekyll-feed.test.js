@@ -65,7 +65,7 @@ describe('jekyll-feed integration', () => {
   it('should have proper Atom feed structure', async () => {
     const feedResult = results.find(r => r.permalink === '/feed.xml');
     const content = feedResult.content;
-    expect(content).toContain('<generator uri="https://jekyllrb.com/" version="4.3.2">Jekyll</generator>');
+    expect(content).toContain('<generator uri="https://jekyllrb.com/" version="4.3.4">Jekyll</generator>');
     expect(content).toContain('<link href="https://example.com/feed.xml" rel="self"');
     expect(content).toContain('<link href="https://example.com/" rel="alternate"');
     expect(content).toContain('<updated>');

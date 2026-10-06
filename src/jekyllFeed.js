@@ -15,6 +15,8 @@
  * Template source: https://github.com/jekyll/jekyll-feed/blob/v0.17.0/lib/jekyll-feed/feed.xml
  * (MIT license, (c) Jekyll contributors)
  */
+import { parseMarkdown } from './engine.js';
+
 export const FEED_TEMPLATE = `<?xml version="1.0" encoding="utf-8"?>
 {% if page.xsl %}
   <?xml-stylesheet type="text/xml" href="{{ '/feed.xslt.xml' | absolute_url }}"?>
@@ -150,11 +152,23 @@ export async function generateFeeds(engine) {
   const siteCtx = engine._buildSiteContext().site;
   const results = [];
 
+  // FIX (oracle-found): real jekyll-feed uses rendered HTML for post.content,
+  // not raw markdown. Render each post's content to HTML.
+  for (const post of siteCtx.posts || []) {
+    if (post.content && !post.content.includes('<')) {
+      // Heuristic: if content doesn't contain HTML tags, it's raw markdown
+      post.content = parseMarkdown(post.content);
+    }
+  }
+
   const renderFeed = async (page) => {
-    const html = await engine.liquidEngine.parseAndRender(FEED_TEMPLATE, {
+    // FIX (oracle-found): real jekyll-feed minifies the template with
+    // MINIFY_REGEX = /(?<=>|})\s+/ — strips whitespace after > or }.
+    const minifiedTemplate = FEED_TEMPLATE.replace(/(?<=>|})\s+/g, '');
+    const html = await engine.liquidEngine.parseAndRender(minifiedTemplate, {
       site: siteCtx,
       page,
-      jekyll: { version: '4.3.2' },
+      jekyll: { version: '4.3.4' },
     });
     return {
       path: page.url.slice(1), // 'feed.xml' (no leading slash)

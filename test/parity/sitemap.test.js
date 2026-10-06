@@ -21,7 +21,7 @@ describe('jekyll-sitemap', () => {
     expect(sitemap.content).toContain('<?xml');
     expect(sitemap.content).toContain('<urlset');
     expect(sitemap.content).toContain('https://example.com/');
-    expect(sitemap.content).toContain('https://example.com/about/');
+    expect(sitemap.content).toContain('https://example.com/about.html');
   });
 
   test('no sitemap without plugin', async () => {

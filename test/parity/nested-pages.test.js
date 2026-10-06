@@ -16,8 +16,8 @@ describe('nested pages', () => {
     const pages = await engine.build();
     const permalinks = pages.map((p) => p.permalink);
     expect(permalinks).toContain('/');
-    expect(permalinks).toContain('/docs/intro/');
-    const intro = pages.find((p) => p.permalink === '/docs/intro/');
+    expect(permalinks).toContain('/docs/intro.html');
+    const intro = pages.find((p) => p.permalink === '/docs/intro.html');
     expect(intro.content).toContain('Intro content');
   });
 
@@ -29,7 +29,7 @@ describe('nested pages', () => {
       },
     });
     const pages = await engine.build();
-    const adv = pages.find((p) => p.permalink === '/docs/guide/advanced/');
+    const adv = pages.find((p) => p.permalink === '/docs/guide/advanced.html');
     expect(adv).toBeDefined();
     expect(adv.content).toContain('Advanced content');
   });
