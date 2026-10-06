@@ -51,7 +51,32 @@ async function build(source, destination) {
     fs.writeFileSync(outPath, page.content);
   }
 
-  console.log(`Built ${pages.length} pages to ${destination}`);
+  // Copy binary static files (images, videos, fonts, etc.)
+  // These are in VFS as empty strings (BINARY_EXT) — copy from source.
+  const BINARY_EXT = new Set([
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'bmp', 'tiff',
+    'woff', 'woff2', 'ttf', 'otf', 'eot',
+    'mp4', 'webm', 'ogv', 'mp3', 'ogg', 'wav', 'flac',
+    'pdf', 'zip', 'gz', 'tar',
+  ]);
+  let binaryCount = 0;
+  for (const [relPath, content] of Object.entries(vfs)) {
+    if (content !== '') continue;
+    const dot = relPath.lastIndexOf('.');
+    const ext = dot === -1 ? '' : relPath.slice(dot + 1).toLowerCase();
+    if (!BINARY_EXT.has(ext)) continue;
+    // Skip if it's a page that was already written
+    if (pages.some((p) => p.path === relPath)) continue;
+    const srcPath = path.join(source, relPath);
+    const destPath = path.join(destination, relPath);
+    if (fs.existsSync(srcPath)) {
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      fs.copyFileSync(srcPath, destPath);
+      binaryCount++;
+    }
+  }
+
+  console.log(`Built ${pages.length} pages + ${binaryCount} binary files to ${destination}`);
   return pages;
 }
 
