@@ -1,0 +1,2359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jekyll Engine Playground</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            slate: {
+              850: '#1b2330',
+              900: '#0f172a',
+              950: '#070a13',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Ace Editor CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .scrollbar-thin::-webkit-scrollbar { width: 5px; height: 5px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .glow-text { text-shadow: 0 0 20px rgba(6, 182, 212, 0.4); }
+    
+    /* Ensure Ace fits container */
+    #editor {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+    }
+  </style>
+<base target="_blank">
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen flex flex-col overflow-hidden">
+
+  <!-- Main Top Navbar -->
+  <header class="border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-md sticky top-0 z-50 flex-none">
+    <div class="px-4 lg:px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+          <svg class="w-4.5 h-4.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+        </div>
+        <div>
+          <h1 class="text-xs lg:text-sm font-bold text-white tracking-wide glow-text">JEKYLL PLAYGROUND</h1>
+          <p class="text-[10px] text-cyan-400 font-medium font-mono">Liquid VM + Jekyll Parser Scope</p>
+        </div>
+      </div>
+
+      <!-- Compilation Controls -->
+      <div class="flex items-center gap-2">
+        <button id="btn-reset" class="px-2.5 py-1.5 text-xs font-semibold text-slate-400 hover:text-rose-400 transition-colors flex items-center gap-1.5 rounded-md hover:bg-slate-800/50">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          <span class="hidden sm:inline">Reset Workspace</span>
+        </button>
+        
+        <button id="btn-build" class="px-4 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold rounded-md shadow-md shadow-cyan-500/10 transition-all flex items-center gap-1.5 active:scale-95">
+          <svg id="build-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path></svg>
+          <span id="build-text">Build Pages</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Responsive Screen Selector (Mobile Top Navigation) -->
+  <div class="lg:hidden flex border-b border-slate-800 bg-slate-900/40 text-xs">
+    <button class="flex-1 py-2.5 text-center font-medium border-b-2 border-cyan-500 text-cyan-400 active-mobile-tab" id="mobile-tab-sidebar" onclick="showMobilePane('sidebar')">Files</button>
+    <button class="flex-1 py-2.5 text-center font-medium border-b-2 border-transparent text-slate-400" id="mobile-tab-editor" onclick="showMobilePane('editor')">Editor</button>
+    <button class="flex-1 py-2.5 text-center font-medium border-b-2 border-transparent text-slate-400" id="mobile-tab-preview" onclick="showMobilePane('preview')">Live Output</button>
+  </div>
+
+  <!-- Primary Workspace Wrapper -->
+  <main class="flex-1 flex overflow-hidden relative">
+
+    <!-- Workspace Panel 1: File Browser Sidebar -->
+    <aside id="workspace-sidebar" class="w-full lg:w-64 border-r border-slate-800/80 bg-slate-900/40 flex flex-col flex-none transition-all duration-200">
+      <div class="p-3 border-b border-slate-800/80 flex items-center justify-between bg-slate-900/60">
+        <span class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">File Directory</span>
+        <div class="flex items-center gap-1.5">
+          <button id="btn-add-file" class="p-1 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded transition-colors" title="Create File">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
+          </button>
+          <button id="btn-delete-file" class="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors" title="Delete Active File">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Recursive File Tree container -->
+      <div class="flex-1 overflow-y-auto p-2 scrollbar-thin space-y-1 select-none" id="vfs-tree-root">
+        <!-- Injected programmatically by setupFileTree() -->
+      </div>
+
+      <div class="p-2 border-t border-slate-800/60 bg-slate-950/40 text-[10px] text-slate-500 text-center font-mono">
+        Active VFS Scope
+      </div>
+    </aside>
+
+    <!-- Workspace Panel 2: Code Editor Space -->
+    <section id="workspace-editor" class="hidden lg:flex flex-1 flex-col border-r border-slate-800/80 min-w-0 bg-slate-950 relative">
+      <div class="h-9 px-4 border-b border-slate-800/60 bg-slate-900/30 flex items-center justify-between flex-none">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></span>
+          <span id="active-file-breadcrumb" class="text-xs font-mono text-slate-300">index.md</span>
+        </div>
+        <span id="active-file-status" class="text-[10px] font-semibold text-slate-500 font-mono tracking-wider uppercase">READY</span>
+      </div>
+
+      <div class="flex-1 relative bg-slate-950">
+        <!-- Ace Target element -->
+        <div id="editor" class="w-full h-full"></div>
+      </div>
+
+      <div class="px-4 py-1 border-t border-slate-800/60 bg-slate-900/30 flex-none flex justify-between items-center text-[10px] text-slate-500 font-mono">
+        <span>Encoding: UTF-8</span>
+        <span id="editor-cursor-pos">Ln 1, Col 1</span>
+      </div>
+    </section>
+
+    <!-- Workspace Panel 3: Live Output Sandbox Frame -->
+    <section id="workspace-preview" class="hidden lg:flex flex-1 flex-col min-w-0 bg-slate-950">
+      
+      <!-- Panel Header Tabs -->
+      <div class="flex items-center border-b border-slate-800/80 bg-slate-900/50 flex-none overflow-x-auto scrollbar-thin">
+        <button class="output-tab tab-active px-4 py-2.5 text-xs font-semibold tracking-wide transition-all border-b-2" data-tab="preview">
+          LIVE PREVIEW
+        </button>
+        <button class="output-tab tab-inactive px-4 py-2.5 text-xs font-medium tracking-wide transition-all border-b-2 text-slate-400 hover:text-slate-200" data-tab="html">
+          COMPILED HTML
+        </button>
+        <button class="output-tab tab-inactive px-4 py-2.5 text-xs font-medium tracking-wide transition-all border-b-2 text-slate-400 hover:text-slate-200" data-tab="json">
+          JSON MODEL
+        </button>
+        <button class="output-tab tab-inactive px-4 py-2.5 text-xs font-medium tracking-wide transition-all border-b-2 text-slate-400 hover:text-slate-200" data-tab="console">
+          BUILD LOGS
+        </button>
+      </div>
+
+      <!-- Tab Sandbox Content Area -->
+      <div class="flex-1 relative overflow-hidden bg-slate-900/20">
+
+        <!-- Tab Panel: Live Browser Preview -->
+        <div id="output-pane-preview" class="output-pane absolute inset-0 flex flex-col">
+          <!-- Sandbox Simulated URL Bar -->
+          <div class="flex items-center gap-2 px-3 py-1.5 border-b border-slate-800/40 bg-slate-900/40 text-xs">
+            <div class="flex gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-rose-500/80"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-500/80"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></span>
+            </div>
+            
+            <div class="flex-1 bg-slate-950 border border-slate-800/80 px-2.5 py-0.5 rounded text-[11px] font-mono text-slate-400 flex items-center gap-1">
+              <svg class="w-3 h-3 text-emerald-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>
+              <span class="text-slate-600">sandbox://site.local</span><span id="preview-path" class="text-slate-300">/index.html</span>
+            </div>
+
+            <div class="flex items-center gap-1 bg-slate-800 p-0.5 rounded border border-slate-700/60 scale-90">
+              <button id="preview-light" class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-700 text-white transition-all">Light</button>
+              <button id="preview-dark" class="px-2 py-0.5 rounded text-[10px] font-medium text-slate-400 hover:text-white transition-all">Dark</button>
+            </div>
+          </div>
+          <!-- Target render iframe -->
+          <iframe id="preview-frame" class="w-full flex-1 border-none bg-white transition-colors duration-200"></iframe>
+        </div>
+
+        <!-- Tab Panel: Live Compiled HTML -->
+        <div id="output-pane-html" class="output-pane absolute inset-0 overflow-auto hidden">
+          <div class="p-4 h-full">
+            <pre class="h-full"><code id="html-content" class="font-mono text-xs text-slate-300 whitespace-pre-wrap selection:bg-slate-700"></code></pre>
+          </div>
+        </div>
+
+        <!-- Tab Panel: Output Data Model Map -->
+        <div id="output-pane-json" class="output-pane absolute inset-0 overflow-auto hidden">
+          <div class="p-4 h-full">
+            <pre class="h-full"><code id="json-content" class="font-mono text-xs text-indigo-300 whitespace-pre-wrap selection:bg-slate-700"></code></pre>
+          </div>
+        </div>
+
+        <!-- Tab Panel: Build Logs Console -->
+        <div id="output-pane-console" class="output-pane absolute inset-0 overflow-auto hidden">
+          <div id="console-content" class="font-mono text-xs p-4 space-y-1.5 selection:bg-slate-700">
+            <div class="text-slate-500 italic">Playground ready. Trigger "Build Pages" above.</div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal Screen: Add File -->
+  <div id="modal-add" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center animate-fade-in">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-5 w-96 max-w-[90%] transform scale-100 transition-all">
+      <h3 class="text-sm font-semibold text-white mb-1">Create Virtual Resource</h3>
+      <p class="text-[11px] text-slate-400 mb-4 leading-relaxed">Specify full paths (directories will auto-create). Example: <code class="text-cyan-400 font-mono bg-slate-950 px-1 rounded">_posts/2026-06-22-demo.md</code></p>
+      
+      <input id="new-file-path" type="text" placeholder="e.g., _includes/header.html" class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 mb-4 font-mono">
+      
+      <div class="flex justify-end gap-2">
+        <button id="btn-cancel-add" class="px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors">Dismiss</button>
+        <button id="btn-confirm-add" class="px-4 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold rounded-lg transition-colors">Create Resource</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inline Script: Jekyll Compiler Module -->
+  <script type="module">
+    // -------------------------------------------------------------
+    // Virtual Site Assets Store (VFS Default Templates)
+    // -------------------------------------------------------------
+    const defaultVFS = {
+      "_config.yml": `title: "Static Site Sandbox"
+author: "Lead Designer"
+permalink: /blog/:title/
+baseurl: ""
+`,
+      "_layouts/default.html": `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ page.title }} | {{ site.title }}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 850px; margin: 0 auto; padding: 2.5rem; line-height: 1.6; background-color: #fafafa; color: #1e293b; }
+    header { border-bottom: 2px solid #e2e8f0; padding-bottom: 1.5rem; margin-bottom: 2.5rem; display: flex; align-items: center; justify-content: space-between; }
+    h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.025em; color: #0f172a; }
+    nav a { margin-left: 1rem; color: #0284c7; text-decoration: none; font-weight: 500; font-size: 0.9rem; }
+    nav a:hover { text-decoration: underline; }
+    .layout-grid { display: grid; grid-template-columns: 1fr 280px; gap: 2rem; }
+    @media (max-width: 768px) { .layout-grid { grid-template-columns: 1fr; } }
+    article { min-height: 300px; }
+    blockquote { border-left: 4px solid #0ea5e9; padding-left: 1rem; margin-left: 0; color: #475569; font-style: italic; }
+    footer { border-top: 1px solid #e2e8f0; padding-top: 1.5rem; margin-top: 4rem; color: #64748b; font-size: 0.8rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{ site.title }}</h1>
+    {% include navigation.html %}
+  </header>
+
+  <div class="layout-grid">
+    <main>
+      {{ content }}
+    </main>
+
+    <!-- Passing parameters and dynamic template values to Jekyll-style includes -->
+    <aside>
+      {% assign custom_component = "sidebar_card.html" %}
+      {% include {{ custom_component }} title="Local Sandbox Scope" type="info" %}
+    </aside>
+  </div>
+
+  <footer>
+    <p>© {{ 'now' | date: '%Y' }} {{ site.author }}. Compiled inside Web Liquid VM.</p>
+  </footer>
+</body>
+</html>`,
+      "_includes/navigation.html": `<nav>
+  <a href="/">Home</a>
+  <a href="/about">About</a>
+  <a href="/blog">Blog</a>
+</nav>`,
+      "_includes/sidebar_card.html": `<div style="border: 1px solid #e2e8f0; background: #fff; padding: 1.25rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.02)">
+  <h4 style="margin-top: 0; margin-bottom: 0.5rem; color: #0ea5e9;">{{ include.title }}</h4>
+  <p style="margin: 0; font-size: 0.85rem; color: #475569;">
+    This sidebar represents a dynamic card using:
+  </p>
+  <code style="display: block; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; margin: 0.5rem 0;">
+    include.type = {{ include.type }}
+  </code>
+  <span style="font-size: 0.75rem; color: #94a3b8;">Parsed dynamically inside LiquidJS.</span>
+</div>`,
+      "_includes/alert_box.html": `<div style="background-color: #f0fdf4; border-left: 4px solid #16a34a; padding: 1rem; margin: 1rem 0; border-radius: 4px; color: #166534; font-size: 0.9rem;">
+  <strong style="display: block; margin-bottom: 0.25rem;">{{ include.heading | default: "Notification" }}</strong>
+  {{ include.body_content }}
+</div>`,
+      "_data/authors.yml": `alice:
+  name: "Alice Chen"
+  bio: "Frontend architect and design enthusiast."
+  twitter: "@alicechen"
+
+bob:
+  name: "Bob Smith"
+  bio: "Systems dev specializing in distributed runtime sandboxes."
+  twitter: "@bobsmith"`,
+      "index.md": `---
+layout: default.html
+title: "Welcome"
+---
+
+# Jekyll LiquidJS Compiler Sandbox
+
+This playground features the upgraded **LiquidJS** execution compiler with full Jekyll options.
+
+### Parameters Demo
+
+We can pass Jekyll-style key-value variables into includes using \`=\` syntax:
+
+{% include alert_box.html heading="Compilation Alert" body_content="Notice how the parameter assigns with an equals sign instead of a colon, and compiles straight to include.heading!" %}
+
+### Dynamic File Resolution Demo
+
+If the template file name is stored inside a variable, we can omit quotes and write:
+
+\`\`\`liquid
+{% raw %}
+{% assign custom_component = "sidebar_card.html" %}
+{% include {{ custom_component }} title="Dynamic Components" type="info" %}
+{% endraw %}
+\`\`\`
+
+*(See the right sidebar inside the live preview output below to view the rendered component in real-time.)*`,
+      "about.md": `---
+layout: default.html
+title: "About"
+permalink: /about/
+---
+
+# About Authors
+
+This dynamic page reads information straight out of local YAML structures inside \`_data/authors.yml\`.
+
+---
+
+{% assign author = site.data.authors.alice %}
+### {{ author.name }}
+> {{ author.bio }}
+
+*Find Alice on Twitter at [{{ author.twitter }}](https://twitter.com/{{ author.twitter }})*
+
+---
+
+Want to read our updates? Jump over to the [Live VFS Blog](/blog).`,
+      "blog.md": `---
+layout: default.html
+title: "Blog"
+permalink: /blog/
+---
+
+# Live Sandbox Feed
+
+The layout block below iterates over posts found under \`_posts/\`:
+
+{% for post in site.posts %}
+<div style="border: 1px solid #e2e8f0; padding: 1.2rem; border-radius: 8px; margin-bottom: 1.5rem; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.02)">
+  <h2 style="margin: 0 0 0.5rem 0; font-size: 1.25rem;">
+    <a href="{{ post.url }}" style="color: #0ea5e9; text-decoration: none;">{{ post.title }}</a>
+  </h2>
+  <small style="color: #64748b; display: block; margin-bottom: 0.8rem;">Published: {{ post.date | date_to_string }}</small>
+  <p style="margin: 0;">{{ post.excerpt | strip_html | truncate: 150 }}</p>
+</div>
+{% endfor %}`,
+      "_posts/2026-06-20-getting-started.md": `---
+layout: default.html
+title: "Getting Started with the Compiler"
+date: 2026-06-20
+author: alice
+tags: [tutorial, compiler, runtime]
+---
+
+# Static Sandbox Runtimes
+
+This system mimics basic static compilers. When you trigger "Build", it maps files in scope, evaluates template dependency bindings, and publishes the static tree.
+
+## Dynamic Code Execution Block
+
+Current year: **{{ 'now' | date: '%Y' }}**
+Site config author: **{{ site.author }}**
+Current tags: **{{ page.tags | join: ', ' }}**
+
+[Back to main blog](/blog)`,
+      "_posts/2026-06-15-advanced-liquid.md": `---
+layout: default.html
+title: "Evaluation Engine Techniques"
+date: 2026-06-15
+author: bob
+tags: [advanced, design, patterns]
+---
+
+# Complex Processing Filters
+
+Liquid filters transform local outputs dynamically:
+
+- **String Uppercasing**: {{ "hello standard runtime" | upcase }}
+- **Truncating Output**: {{ "This is a long sentence parsed straight from a YAML front matter file format." | truncate: 45 }}
+
+Enjoy evaluating code execution locally inside memory!`,
+    };
+
+ // -------------------------------------------------------------
+// Jekyll-compatible static site engine (LiquidJS + Jekyll options)
+//
+// This is a fixed version of the reviewed engine. Every change is marked
+// with a `// FIX:` comment referencing the issue it addresses, so it's
+// easy to diff against the original. See FIXES.md for the full writeup.
+//
+// Import note: the original used esm.sh CDN URLs (browser-only). These
+// are swapped for plain npm package imports so the engine is testable in
+// Node with Jest. If you need the browser/esm.sh version back, only
+// these four import lines change -- nothing else in the file depends on
+// how the packages were loaded.
+// -------------------------------------------------------------
+// -------------------------------------------------------------
+// Jekyll-compatible static site engine (LiquidJS + Jekyll options)
+//
+// This is a fixed version of the reviewed engine. Every change is marked
+// with a `// FIX:` comment referencing the issue it addresses, so it's
+// easy to diff against the original. See FIXES.md for the full writeup.
+//
+// Import note: the original used esm.sh CDN URLs (browser-only). These
+// are swapped for plain npm package imports so the engine is testable in
+// Node with Jest. If you need the browser/esm.sh version back, only
+// these four import lines change -- nothing else in the file depends on
+// how the packages were loaded.
+// -------------------------------------------------------------
+import { Liquid } from "https://esm.sh/liquidjs";
+import { marked } from "https://esm.sh/marked";
+import * as yaml from "https://esm.sh/js-yaml";
+import fm from "https://esm.sh/front-matter";
+/**
+ * assetsPipeline.js
+ * ---------------------------------------------------------------------------
+ * Compiles VFS SCSS/Sass files to CSS, resolving @import partials from the
+ * VFS's `_sass/` directory exactly as Jekyll + jekyll-sass-converter do.
+ *
+ * Jekyll's Sass pipeline:
+ *   1. Files in `assets/` whose front matter contains `---` are processed.
+ *   2. `@import` paths are resolved from "https://esm.sh/_sass/" (configurable via
+ *      `sass.load_paths` in _config.yml, defaulting to `_sass`).
+ *   3. Output is served at the same path with `.scss`/`.sass` → `.css`.
+ *
+ * Implementation note: Jekyll passes the _sass/ directory as an include
+ * path to the Sass compiler. We do the same by feeding all `_sass/**` VFS
+ * entries to Dart Sass as in-memory importers, which is the approach Dart
+ * Sass itself recommends for VFS/in-memory compilation.
+ */
+
+import * as sass from "https://esm.sh/sass";
+
+/**
+ * Determine if a VFS file should be processed by the Sass pipeline.
+ * Jekyll's rule: files in `assets/` with `.scss` or `.sass` extension that
+ * contain front-matter (start with `---`). Partial files (starting with `_`)
+ * are compiled only when imported, not directly.
+ */
+export function isSassAsset(path, content) {
+  if (!path.startsWith('assets/') && !path.startsWith('/assets/')) return false;
+  if (!/\.(scss|sass)$/i.test(path)) return false;
+  const name = path.split('/').pop();
+  if (name.startsWith('_')) return false; // partial, not a root
+  // Jekyll requires front matter for asset files to be processed
+  return content.startsWith('---');
+}
+
+/**
+ * Compile a single SCSS/Sass asset file using the VFS as the import resolver.
+ *
+ * @param {string} path - the VFS key (e.g. "assets/main.scss")
+ * @param {string} content - raw file content (may have front matter)
+ * @param {Object} vfs - full VFS map (used to resolve @import partials)
+ * @param {Object} config - site config (reads `sass.style` for compressed/expanded)
+ * @returns {{ css: string, permalink: string }}
+ */
+export function compileSassAsset(path, content, vfs, config = {}) {
+  // Strip front matter before passing to Sass (Sass doesn't understand ---)
+  const stripped = content.replace(/^---[\s\S]*?---\n?/, '');
+
+  const sassStyle = config?.sass?.style || 'compressed';
+  const syntax = path.endsWith('.sass') ? 'indented' : 'scss';
+
+  // Build a map of all _sass/ partials for the custom importer
+  const sassPartials = {};
+  for (const [vfsPath, vfsContent] of Object.entries(vfs)) {
+    if (vfsPath.startsWith('_sass/')) {
+      // Normalise the key to what Sass would request in an @import:
+      // "_sass/minima/_base.scss" → both "minima/_base" and "minima/_base.scss"
+      const rel = vfsPath.slice('_sass/'.length);
+      sassPartials[rel] = vfsContent;
+      sassPartials[rel.replace(/\.(scss|sass)$/, '')] = vfsContent;
+      // Also store with leading underscore stripped (Sass partial convention)
+      const noUnderscore = rel.replace(/\/_(?=[^/]+$)/, '/').replace(/^_/, '');
+      sassPartials[noUnderscore] = vfsContent;
+      sassPartials[noUnderscore.replace(/\.(scss|sass)$/, '')] = vfsContent;
+    }
+  }
+
+  const importer = {
+    canonicalize(url, context) {
+      // When Sass resolves a nested @import from inside an already-loaded
+      // vfs: file, the `url` may be relative to the parent's canonical
+      // URL. Strip the vfs: scheme and parent directory if present.
+      let key = url;
+      if (context?.containingUrl) {
+        const containingPath = context.containingUrl.pathname.replace(/^\//, '');
+        const containingDir = containingPath.includes('/')
+          ? containingPath.slice(0, containingPath.lastIndexOf('/') + 1)
+          : '';
+        const candidate = containingDir + url;
+        if (sassPartials[candidate] !== undefined) return new URL(`vfs:///${candidate}`);
+        if (sassPartials[candidate.replace(/\.scss$/, '')] !== undefined)
+          return new URL(`vfs:///${candidate.replace(/\.scss$/, '')}`);
+      }
+      if (sassPartials[key] !== undefined) return new URL(`vfs:///${key}`);
+      // Try adding .scss extension
+      if (sassPartials[`${key}.scss`] !== undefined) return new URL(`vfs:///${key}.scss`);
+      // Also check without the leading _ (Sass convention)
+      const segments = key.split('/');
+      const last = segments[segments.length - 1];
+      const withUnderscore = [...segments.slice(0, -1), `_${last}`].join('/');
+      if (sassPartials[withUnderscore] !== undefined) return new URL(`vfs:///${withUnderscore}`);
+      if (sassPartials[`${withUnderscore}.scss`] !== undefined)
+        return new URL(`vfs:///${withUnderscore}.scss`);
+      return null;
+    },
+    load(canonicalUrl) {
+      const key = canonicalUrl.pathname.replace(/^\//, ''); // strip leading /
+      const source =
+        sassPartials[key] ||
+        sassPartials[key.replace(/\.(scss|sass)$/, '')] ||
+        '';
+      return { contents: source, syntax: key.endsWith('.sass') ? 'indented' : 'scss' };
+    },
+  };
+
+  let result;
+  try {
+    result = sass.compileString(stripped, {
+      syntax,
+      style: sassStyle === 'compressed' ? 'compressed' : 'expanded',
+      importers: [importer],
+      // Silence deprecation warnings from real-world themes
+      quietDeps: true,
+      logger: sass.Logger.silent,
+    });
+  } catch (err) {
+    // Return a CSS comment with the error rather than crashing the whole build
+    return {
+      css: `/* Sass compile error: ${err.message.replace(/\*\//g, '* /')} */`,
+      permalink: sassToCssPermalink(path),
+    };
+  }
+
+  return {
+    css: result.css,
+    permalink: sassToCssPermalink(path),
+  };
+}
+
+function sassToCssPermalink(path) {
+  return '/' + path.replace(/\.(scss|sass)$/, '.css');
+}
+
+
+'use strict';
+/**
+ * jekyllTags.js
+ * ---------------------------------------------------------------------------
+ * Registers all Jekyll-specific Liquid tags and filter fixes that LiquidJS
+ * either lacks entirely or gets subtly wrong. Called from JekyllEngine's
+ * constructor.
+ *
+ * Tags implemented:
+ *   {% highlight lang [linenos] %} ... {% endhighlight %}
+ *   {% link path %}
+ *   {% post_url slug-or-date-slug %}
+ *   {% seo %}           (no-op stub -- plugin)
+ *   {% feed_meta %}     (no-op stub -- plugin)
+ *   {% gist user/id %}  (no-op stub -- external service)
+ *
+ * Filter fixes:
+ *   to_integer -- LiquidJS returns floats unchanged; Jekyll truncates to int
+ */
+
+import hljs from "https://esm.sh/highlight.js";
+
+// ─── highlight tag ──────────────────────────────────────────────────────────
+// Mirrors Jekyll::Tags::HighlightBlock output format exactly:
+//   <figure class="highlight">
+//     <pre><code class="language-{lang}" data-lang="{lang}">…</code></pre>
+//   </figure>
+// Uses highlight.js for tokenisation (output differs from Rouge's HTML
+// token classes, but all structural attributes match real Jekyll).
+//
+// Documented limitation: Rouge's token classes (e.g. `<span class="k">`)
+// are language-specific and won't match ours — the structure and the
+// presence of a highlighted block are byte-compatible, individual span
+// class names are not. For the purpose of this engine (rendering content
+// that looks correct in a browser) this is acceptable; if you need
+// byte-identical output to Rouge you would need a Rouge WASM port.
+function registerHighlightTag(engine) {
+  engine.registerTag('highlight', {
+    parse(tagToken, remainTokens) {
+      const args = tagToken.args.trim().split(/\s+/);
+      this.lang = args[0] || 'plaintext';
+      this.linenos = args.includes('linenos');
+      this.tokens = [];
+      let closed = false;
+      while (remainTokens.length) {
+        const token = remainTokens.shift();
+        if (token.constructor.name === 'TagToken' && token.name === 'endhighlight') {
+          closed = true;
+          break;
+        }
+        this.tokens.push(token);
+      }
+      if (!closed) throw new Error('{% highlight %} tag not closed with {% endhighlight %}');
+    },
+    async render(ctx) {
+      // Render any Liquid inside the block first (unusual but valid)
+      const rawCode = this.tokens
+        .map((t) => (typeof t.getText === 'function' ? t.getText() : t.value ?? ''))
+        .join('');
+      const code = rawCode.replace(/^\n/, '').replace(/\n$/, '');
+
+      let highlighted;
+      try {
+        const lang = this.lang === 'plaintext' ? 'text' : this.lang;
+        if (hljs.getLanguage(lang)) {
+          highlighted = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+        } else {
+          highlighted = escapeHtml(code);
+        }
+      } catch {
+        highlighted = escapeHtml(code);
+      }
+
+      const langClass = `language-${this.lang}`;
+      const inner = `<code class="${langClass}" data-lang="${this.lang}">${highlighted}</code>`;
+      const pre = `<pre>${inner}</pre>`;
+      return `<figure class="highlight">${pre}</figure>`;
+    },
+  });
+}
+
+// ─── link tag ───────────────────────────────────────────────────────────────
+// {% link path/to/file.md %} → the resolved URL of that page.
+// Mirrors Jekyll::Tags::Link: looks up the page in site context.
+function registerLinkTag(engine) {
+  engine.registerTag('link', {
+    parse(tagToken) {
+      this.target = tagToken.args.trim();
+    },
+    async render(ctx) {
+      const site = ctx.get(['site']);
+      const allPages = [
+        ...(site?.pages || []),
+        ...(site?.posts || []),
+        ...(site?.static_files || []),
+        // also flatten other collections
+        ...Object.entries(site || {})
+          .filter(([k]) => !['pages', 'posts', 'static_files', 'tags', 'categories', 'data'].includes(k))
+          .flatMap(([, v]) => (Array.isArray(v) ? v : [])),
+      ];
+      const found = allPages.find(
+        (p) => p.path === this.target || p.url === this.target || p.path === `/${this.target}`
+      );
+      if (found) return found.url || found.path || this.target;
+      // Fallback: treat as a literal relative URL
+      return `/${this.target.replace(/^\//, '')}`;
+    },
+  });
+}
+
+// ─── post_url tag ───────────────────────────────────────────────────────────
+// {% post_url 2026-06-29-welcome-to-jekyll %} → the resolved post URL.
+// Mirrors Jekyll::Tags::PostUrl: matches by slug (with or without date prefix).
+function registerPostUrlTag(engine) {
+  engine.registerTag('post_url', {
+    parse(tagToken) {
+      this.slug = tagToken.args.trim();
+    },
+    async render(ctx) {
+      const posts = ctx.get(['site', 'posts']) || [];
+      // Try matching the full path filename (without extension) or just the slug portion
+      const found = posts.find((p) => {
+        if (!p.path) return false;
+        const base = p.path.replace(/^.*_posts\//, '').replace(/\.(md|markdown|html?)$/, '');
+        return base === this.slug || base.replace(/^\d{4}-\d{2}-\d{2}-/, '') === this.slug;
+      });
+      if (found) return found.url;
+      // Fallback: raise a Liquid-style error string (mirrors Jekyll's behaviour)
+      return `[post_url: could not find post "${this.slug}"]`;
+    },
+  });
+}
+
+// ─── {% seo %} tag ──────────────────────────────────────────────────────────
+// A faithful (not no-op) implementation of the most load-bearing parts of
+// the jekyll-seo-tag plugin, grounded directly in the real gem's
+// lib/jekyll-seo-tag/drop.rb (read from the installed gem). minima's
+// _includes/head.html relies ENTIRELY on {% seo %} for the page's
+// <title> tag -- there is no other fallback anywhere in the layout chain
+// -- so treating this as a pure no-op silently produces titleless pages,
+// which is a real and meaningful gap, not a cosmetic one.
+//
+// Implemented (verified against real Drop#title/#description logic):
+//   <title>            -- exact algorithm: page_title vs site_title
+//                          combination with " | " separator
+//   <meta name="generator">
+//   <meta property="og:title">, <meta name="description">,
+//   <meta property="og:description">, <link rel="canonical">,
+//   <meta property="og:url">, <meta property="og:type">
+//
+// NOT implemented (documented limitation): Twitter card meta, Facebook
+// meta, JSON-LD structured data script tag, image meta (og:image and
+// friends), webmaster verification tags, author meta. These are real
+// gaps if you depend on rich social-card previews specifically, but they
+// don't affect page title/SEO-description fidelity, which is the part
+// every page actually needs.
+function registerSeoTag(engine) {
+  engine.registerTag('seo', {
+    parse(tagToken) {
+      this.raw = tagToken.args || '';
+    },
+    async render(ctx) {
+      const site = ctx.get(['site']) || {};
+      const page = ctx.get(['page']) || {};
+      const jekyll = ctx.get(['jekyll']) || {};
+
+      const siteTitle = site.title || site.name;
+      const pageTitle = page.title || siteTitle;
+      const siteTaglineOrDescription = site.tagline || site.description;
+
+      let title;
+      if (siteTitle && pageTitle !== siteTitle) {
+        title = `${pageTitle} | ${siteTitle}`;
+      } else if (site.description && siteTitle) {
+        title = `${siteTitle} | ${siteTaglineOrDescription}`;
+      } else {
+        title = pageTitle || siteTitle;
+      }
+
+      const description = page.description || page.excerpt || site.description;
+      const showTitle = !/title=false/i.test(this.raw) && !!title;
+
+      const lines = [`<!-- Begin Jekyll SEO tag v0 (approximate) -->`];
+      if (showTitle) lines.push(`<title>${escapeHtml(stripHtml(title))}</title>`);
+      lines.push(`<meta name="generator" content="Jekyll v${jekyll.version || '4.3.2'}" />`);
+      if (pageTitle) lines.push(`<meta property="og:title" content="${escapeHtml(stripHtml(pageTitle))}" />`);
+      if (description) {
+        const d = escapeHtml(stripHtml(description));
+        lines.push(`<meta name="description" content="${d}" />`);
+        lines.push(`<meta property="og:description" content="${d}" />`);
+      }
+      if (site.url) {
+        const canonical = (site.url || '') + (site.baseurl || '') + (page.url || '');
+        lines.push(`<link rel="canonical" href="${canonical}" />`);
+        lines.push(`<meta property="og:url" content="${canonical}" />`);
+      }
+      if (siteTitle) lines.push(`<meta property="og:site_name" content="${escapeHtml(stripHtml(siteTitle))}" />`);
+      if (page.date) {
+        lines.push(`<meta property="og:type" content="article" />`);
+      } else {
+        lines.push(`<meta property="og:type" content="website" />`);
+      }
+      lines.push(`<!-- End Jekyll SEO tag -->`);
+      return lines.join('\n');
+    },
+  });
+}
+
+function stripHtml(str) {
+  return String(str).replace(/<\/?[^>]+>/g, '');
+}
+
+// ─── {% feed_meta %} tag ────────────────────────────────────────────────────
+// jekyll-feed's tag, which outputs a <link rel="alternate" type="application/
+// atom+xml"> pointing at the site's feed.xml. We render the tag (so the link
+// is present, since several themes and browsers genuinely use this for feed
+// discovery) but do NOT generate an actual feed.xml file -- that would
+// require implementing the Atom feed XML generator itself, which is a much
+// larger, separate piece of work than this single Liquid tag.
+function registerFeedMetaTag(engine) {
+  engine.registerTag('feed_meta', {
+    parse() {},
+    render(ctx) {
+      const site = ctx.get(['site']) || {};
+      const title = site.title || site.name || '';
+      return `<link type="application/atom+xml" rel="alternate" href="${
+        (site.baseurl || '') + '/feed.xml'
+      }" title="${escapeHtml(stripHtml(title))}" />`;
+    },
+  });
+}
+
+// ─── remaining plugin stub tags ─────────────────────────────────────────────
+// {% gist %} embeds an external GitHub Gist via <script src>; there's
+// nothing meaningful to render without making a real network call, so this
+// one really is left as a documented no-op.
+function registerPluginStubs(engine) {
+  engine.registerTag('gist', {
+    parse() {},
+    render() { return ''; },
+  });
+}
+
+// ─── filter fixes ───────────────────────────────────────────────────────────
+function registerFilterFixes(engine) {
+  // FIX: LiquidJS's to_integer passes floats through unchanged. Jekyll (Ruby)
+  // calls `.to_i` which truncates toward zero. Verified against oracle:
+  //   1.9.to_i → 1,  -1.9.to_i → -1,  true.to_i → 1,  false.to_i → 0
+  engine.registerFilter('to_integer', (v) => {
+    if (v === true) return 1;
+    if (v === false || v === null || v === undefined) return 0;
+    if (typeof v === 'number') return Math.trunc(v);
+    if (typeof v === 'string') {
+      const m = v.trim().match(/^([+-]?\d+)/);
+      return m ? parseInt(m[1], 10) : 0;
+    }
+    return 0;
+  });
+}
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function registerJekyllExtensions(liquidEngine) {
+  registerHighlightTag(liquidEngine);
+  registerLinkTag(liquidEngine);
+  registerPostUrlTag(liquidEngine);
+  registerSeoTag(liquidEngine);
+  registerFeedMetaTag(liquidEngine);
+  registerPluginStubs(liquidEngine);
+  registerFilterFixes(liquidEngine);
+}
+const noop = () => {};
+
+// -------------------------------------------------------------
+// Internal slug helper, used for permalink generation.
+//
+// FIX (parity with Jekyll::Utils.slugify's default mode): the original
+// used `\w` (ASCII word chars, which KEEPS underscores) and had no
+// Unicode awareness. Jekyll's default mode keeps any Unicode letter,
+// mark, or decimal digit and hyphenates everything else (including
+// underscores). "My_Title" must become "my-title", not "my_title".
+// -------------------------------------------------------------
+function slugify(str) {
+  return String(str)
+    .toLowerCase()
+    .replace(/[^\p{M}\p{L}\p{Nd}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// -------------------------------------------------------------
+// URL helpers for the relative_url / absolute_url filters.
+//
+// FIX: neither filter exists in LiquidJS's built-ins, and the original
+// `relative_url` override was a naive `baseurl + url` concatenation with
+// no leading-slash normalization, no baseurl trailing-slash handling,
+// and (most importantly) no passthrough for already-absolute URLs --
+// it would mangle `http://...` input. There was no `absolute_url` filter
+// at all. These mirror the oracle-verified algorithm from Jekyll's own
+// `url_filters.rb` (see jekyll-filters-js earlier in this thread).
+// -------------------------------------------------------------
+const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+function isAbsoluteUrl(str) {
+  return SCHEME_RE.test(str);
+}
+function ensureLeadingSlash(str) {
+  if (str === null || str === undefined || str === '') return str === undefined ? '' : str;
+  return str.startsWith('/') ? str : `/${str}`;
+}
+function sanitizedBaseurl(baseurl) {
+  if (baseurl === null || baseurl === undefined) return '';
+  return String(baseurl).replace(/\/$/, '');
+}
+function computeRelativeUrl(input, config) {
+  if (input === null || input === undefined) return input;
+  const str = String(input);
+  if (isAbsoluteUrl(str)) return input;
+  return ensureLeadingSlash(sanitizedBaseurl(config.baseurl)) + ensureLeadingSlash(str);
+}
+function computeAbsoluteUrl(input, config) {
+  if (input === null || input === undefined) return input;
+  const str = String(input);
+  if (isAbsoluteUrl(str)) return input;
+  const siteUrl = config.url;
+  if (siteUrl === null || siteUrl === undefined || siteUrl === '') {
+    return computeRelativeUrl(input, config);
+  }
+  const combined = String(siteUrl) + computeRelativeUrl(input, config);
+  try {
+    return new URL(combined).href;
+  } catch (e) {
+    return combined;
+  }
+}
+// FIX: strip_index filter didn't exist either; trivial but part of the
+// "7 Jekyll filters LiquidJS doesn't have" gap identified earlier.
+function stripIndex(input) {
+  if (input === null || input === undefined || String(input) === '') return input ?? null;
+  return String(input).replace(/\/index\.html?$/, '/');
+}
+
+// High fidelity browser-native Markdown Parser using "marked"
+// (Approximate parity with kramdown -- see PARITY notes in FIXES.md)
+//
+// FIX: kramdown (Jekyll's default Markdown converter) wraps inline
+// backtick code in `<code class="language-plaintext highlighter-rouge">`
+// by default. `marked`'s default codespan renderer just produces a bare
+// `<code>`. Verified against real Jekyll's actual built output. Fenced
+// code blocks (```lang) are also given the same `language-{lang}
+// highlighter-rouge` + `<figure class="highlight">` wrapper kramdown/Rouge
+// use, mirroring the {% highlight %} tag's own output shape for visual
+// consistency (see jekyllTags.js).
+const markedRenderer = new marked.Renderer();
+markedRenderer.codespan = (token) => {
+  const text = typeof token === 'object' ? token.text : token;
+  return `<code class="language-plaintext highlighter-rouge">${text}</code>`;
+};
+markedRenderer.code = (token) => {
+  const { text, lang } = typeof token === 'object' ? token : { text: token, lang: undefined };
+  const langClass = lang ? `language-${lang}` : 'language-plaintext';
+  return `<figure class="highlight"><pre><code class="${langClass} highlighter-rouge">${escapeHtmlForMarkdown(
+    text
+  )}</code></pre></figure>`;
+};
+marked.setOptions({ renderer: markedRenderer });
+
+function escapeHtmlForMarkdown(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function parseMarkdown(md) {
+  return marked.parse(String(md));
+}
+
+// Resolves and normalizes categories following Jekyll standards
+function getPostCategories(frontMatter, filepath) {
+  const categories = [];
+
+  const parts = filepath.split('/');
+  const postsIndex = parts.indexOf('_posts');
+  if (postsIndex > 0) {
+    categories.push(...parts.slice(0, postsIndex));
+  }
+
+  if (frontMatter.category) {
+    categories.push(frontMatter.category);
+  }
+
+  if (frontMatter.categories) {
+    if (Array.isArray(frontMatter.categories)) {
+      categories.push(...frontMatter.categories);
+    } else if (typeof frontMatter.categories === 'string') {
+      categories.push(...frontMatter.categories.trim().split(/\s+/));
+    }
+  }
+
+  return [...new Set(categories.map((c) => String(c).trim()).filter(Boolean))];
+}
+
+// Resolves and normalizes tags following Jekyll standards
+function getPostTags(frontMatter) {
+  const tags = [];
+
+  if (frontMatter.tag) {
+    tags.push(frontMatter.tag);
+  }
+
+  if (frontMatter.tags) {
+    if (Array.isArray(frontMatter.tags)) {
+      tags.push(...frontMatter.tags);
+    } else if (typeof frontMatter.tags === 'string') {
+      tags.push(...frontMatter.tags.trim().split(/\s+/));
+    }
+  }
+
+  return [...new Set(tags.map((t) => String(t).trim()).filter(Boolean))];
+}
+
+function parsePostFilename(filename) {
+  // FIX (.markdown extension): Jekyll accepts both .md and .markdown
+  const match = filename.match(/^(\d{4})-(\d{2})-(\d{2})-(.+)\.(md|markdown)$/);
+  if (!match) return null;
+  const [, year, month, day, slug] = match;
+  return { date: `${year}-${month}-${day}`, slug: slug.replace(/-/g, ' ') };
+}
+
+    
+    /**
+ * ISO-8601 week number and week-year.
+ * Week 1 is the first week with a majority of days in January.
+ */
+function getISOWeek(date) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7; // 1=Mon … 7=Sun
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum); // Thursday of this week
+  return {
+    weekYear: d.getUTCFullYear(),
+    week: Math.ceil((((d - new Date(Date.UTC(d.getUTCFullYear(), 0, 1))) / 86400000) + 1) / 7),
+  };
+}
+
+/**
+ * Ordinal day of the year (1..366).
+ */
+function getDayOfYear(date) {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  return Math.floor((utc - start) / 86400000) + 1;
+} 
+function generatePermalink(frontMatter, slug, date, config = {}) {
+  // 1. Explicit front-matter permalink wins immediately
+  if (frontMatter?.permalink) return frontMatter.permalink;
+
+  // 2. Resolve pattern: front-matter style > global config > 'date'
+  let pattern = frontMatter?.permalink_style || config?.permalink || 'date';
+
+  const presets = {
+    date: '/:categories/:year/:month/:day/:title:output_ext',
+    pretty: '/:categories/:year/:month/:day/:title/',
+    ordinal: '/:categories/:year/:y_day/:title:output_ext',
+    weekdate: '/:categories/:year/W:week/:short_day/:title:output_ext',
+    none: '/:categories/:title:output_ext',
+  };
+  if (presets[pattern]) pattern = presets[pattern];
+
+  // 3. Parse date as UTC (fallback to now if invalid)
+  function toUTCDateString(dateStr) {
+    const s = String(dateStr).trim();
+    if (!s.includes('T')) return s + 'T00:00:00Z';
+    if (!s.match(/Z$|[+-]\d{2}:?\d{2}$/)) return s + 'Z';
+    return s;
+  }
+  const parsedDate = isNaN(Date.parse(date)) ? new Date() : new Date(toUTCDateString(date));
+
+  // 4. Date / time components
+  const year = parsedDate.getUTCFullYear();
+  const shortYear = String(year).slice(-2);
+  const month = String(parsedDate.getUTCMonth() + 1).padStart(2, '0');
+  const iMonth = String(parsedDate.getUTCMonth() + 1);
+  const shortMonth = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parsedDate.getUTCMonth()];
+  const longMonth = ['January','February','March','April','May','June','July','August','September','October','November','December'][parsedDate.getUTCMonth()];
+  const day = String(parsedDate.getUTCDate()).padStart(2, '0');
+  const iDay = String(parsedDate.getUTCDate());
+  const yDay = String(getDayOfYear(parsedDate)).padStart(3, '0');
+
+  const iso = getISOWeek(parsedDate);
+  const wYear = iso.weekYear;
+  const week = String(iso.week).padStart(2, '0');
+  const wDay = parsedDate.getUTCDay() === 0 ? 7 : parsedDate.getUTCDay(); // Mon=1 … Sun=7
+  const shortDay = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][wDay - 1];
+  const longDay = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][wDay - 1];
+
+  const hour = String(parsedDate.getUTCHours()).padStart(2, '0');
+  const minute = String(parsedDate.getUTCMinutes()).padStart(2, '0');
+  const second = String(parsedDate.getUTCSeconds()).padStart(2, '0');
+
+  // 5. CRITICAL FIX (#4): :title comes from the FILENAME (slug param),
+  //    NOT from frontMatter.title. Only frontMatter.slug may override.
+  const titleSource = frontMatter?.slug || slug || '';
+  const title = titleSource;                     // preserves case per Jekyll docs
+  const slugifiedTitle = slugify(titleSource);     // :slug is always slugified
+
+  // 6. Categories
+  let categoriesStr = '';
+  let slugifiedCategoriesStr = '';
+  if (frontMatter?.categories) {
+    const cats = Array.isArray(frontMatter.categories)
+      ? frontMatter.categories
+      : String(frontMatter.categories).split(/\s+/);
+    const normalized = cats.map(c => String(c).trim()).filter(Boolean);
+    categoriesStr = normalized.join('/');
+    slugifiedCategoriesStr = normalized.map(c => slugify(c)).join('/');
+  }
+
+  // 7. Output extension
+  const outputExt = frontMatter?.output_ext || config?.output_ext || '.html';
+
+  // 8. Replace placeholders (longest first to avoid partial collisions)
+  let path = pattern
+    .replace(/:slugified_categories/g, slugifiedCategoriesStr)
+    .replace(/:categories/g, categoriesStr)
+    .replace(/:short_year/g, shortYear)
+    .replace(/:long_month/g, longMonth)
+    .replace(/:short_month/g, shortMonth)
+    .replace(/:i_month/g, iMonth)
+    .replace(/:month/g, month)
+    .replace(/:long_day/g, longDay)
+    .replace(/:short_day/g, shortDay)
+    .replace(/:w_year/g, wYear)
+    .replace(/:y_day/g, yDay)
+    .replace(/:i_day/g, iDay)
+    .replace(/:w_day/g, wDay)
+    .replace(/:week/g, week)
+    .replace(/:year/g, year)
+    .replace(/:day/g, day)
+    .replace(/:hour/g, hour)
+    .replace(/:minute/g, minute)
+    .replace(/:second/g, second)
+    .replace(/:output_ext/g, outputExt)
+    .replace(/:title/g, slugifiedTitle)
+    .replace(/:slug/g, slugifiedTitle);
+
+  // 9. Normalise slashes
+  path = path.replace(/\/+/g, '/');
+  if (!path.startsWith('/')) path = '/' + path;
+
+  return path;
+}
+
+// FIX (generic collections were entirely unimplemented -- only the
+// special `posts` collection ever worked): normalizes _config.yml's
+// `collections:` key, which Jekyll allows as either a bare list of names
+// or a hash mapping name -> options (e.g. { permalink, output }).
+function normalizeCollectionsConfig(collections) {
+  if (!collections) return {};
+  if (Array.isArray(collections)) {
+    return Object.fromEntries(collections.map((name) => [name, {}]));
+  }
+  if (typeof collections === 'object') {
+    return Object.fromEntries(Object.entries(collections).map(([name, opts]) => [name, opts || {}]));
+  }
+  return {};
+}
+
+// Default Jekyll collection permalink is `/:collection/:path/` (no date
+// components, unlike posts). `:path` preserves any subdirectory
+// structure within the collection (e.g. `_projects/web/widget.md` ->
+// `web/widget`), each segment slugified.
+function generateCollectionPermalink(frontMatter, collectionName, relPath, collectionConfig = {}) {
+  if (frontMatter.permalink) return frontMatter.permalink;
+
+  const pattern = frontMatter.permalink_style || collectionConfig.permalink || '/:collection/:path/';
+
+  const lastSlash = relPath.lastIndexOf('/');
+  const dir = lastSlash === -1 ? '' : relPath.slice(0, lastSlash);
+  const base = (lastSlash === -1 ? relPath : relPath.slice(lastSlash + 1)).replace(/\.[^/.]+$/, '');
+  const pathSlug = [dir, slugify(base)].filter(Boolean).join('/');
+
+  let path = pattern
+    .replace(/:collection/g, collectionName)
+    .replace(/:path/g, pathSlug)
+    .replace(/:name/g, slugify(base))
+    .replace(/:title/g, slugify(base));
+
+  path = path.replace(/\/+/g, '/');
+  if (!path.startsWith('/')) path = '/' + path;
+  return path;
+}
+
+// FIX (site.related_posts was entirely unimplemented): mirrors
+// Jekyll::RelatedPosts#most_recent_posts exactly --
+//   (site.posts.docs.last(11).reverse! - [post]).first(10)
+// Since our `allPosts` (site.posts) is already newest-first (unlike
+// Jekyll's internal `Collection#docs`, which is oldest-first), taking
+// the first 11 here is equivalent to Jekyll's "last 11, then reverse".
+// NOTE: this really is just "the most recent other posts", not anything
+// content-based -- that's genuinely how real Jekyll's default behaves
+// (LSI/content-similarity only kicks in if the `classifier-reborn` gem
+// is installed and `lsi: true` is configured, which has no JS
+// equivalent and is out of scope here).
+function defaultRelatedPosts(post, allPosts) {
+  return allPosts.slice(0, 11).filter((p) => p.path !== post.path).slice(0, 10);
+}
+
+// FIX (excerpt_separator was hardcoded to "\n\n" with no way to
+// configure it): mirrors Jekyll's Excerpt#extract_excerpt, which is
+// Ruby's `String#partition` -- take everything before the FIRST
+// occurrence of the separator, or the entire content if the separator
+// never appears at all.
+//
+// Not replicated (documented limitation, see FIXES.md): Jekyll's
+// "sanctify_liquid_tags" (auto-closing a Liquid block tag that got cut
+// off mid-excerpt) and preserving trailing Markdown link-reference
+// definitions after the cut point. Both are niche edge cases.
+function extractExcerpt(content, separator) {
+  if (!separator) return content;
+  const idx = content.indexOf(separator);
+  if (idx === -1) return content;
+  return content.slice(0, idx);
+}
+
+// FIX (pagination was entirely unimplemented): mirrors the classic
+// jekyll-paginate gem's `Pager` class field-for-field (page, per_page,
+// posts, total_posts, total_pages, previous_page(_path), next_page(_path)).
+// Default `paginate_path` ("/page:num") matches Jekyll's own
+// Configuration::DEFAULTS exactly.
+//
+// Adaptation (documented limitation): real jekyll-paginate requires the
+// template page to be literally named `index.html` and matches it to
+// `paginate_path` by walking the directory hierarchy on disk. Since this
+// engine's pages are VFS-based `.md` files with computed permalinks
+// (not real on-disk index.html files), the template page is simply
+// "the root page whose resolved permalink is '/'" -- page 1 keeps that
+// page's own URL; pages 2+ always go to `paginate_path` with `:num`
+// substituted, independent of where page 1 lives (this part exactly
+// matches real Jekyll: `Pager.paginate_path` for page > 1 never
+// considers the template page's own location either).
+function buildPaginators(allPosts, perPage, paginatePathPattern, templateUrl) {
+  const totalPages = Math.ceil(allPosts.length / perPage);
+
+  const pagePath = (num) => {
+    if (num === null || num === undefined || num <= 1) return templateUrl;
+    let p = paginatePathPattern.replace(':num', String(num));
+    if (!p.startsWith('/')) p = '/' + p;
+    return p;
+  };
+
+  const pagers = [];
+  for (let page = 1; page <= totalPages; page++) {
+    const init = (page - 1) * perPage;
+    const posts = allPosts.slice(init, init + perPage);
+    const previousPage = page !== 1 ? page - 1 : null;
+    const nextPage = page !== totalPages ? page + 1 : null;
+    pagers.push({
+      page,
+      per_page: perPage,
+      posts,
+      total_posts: allPosts.length,
+      total_pages: totalPages,
+      previous_page: previousPage,
+      previous_page_path: previousPage !== null ? pagePath(previousPage) : null,
+      next_page: nextPage,
+      next_page_path: nextPage !== null ? pagePath(nextPage) : null,
+      page_path: pagePath(page),
+    });
+  }
+  return pagers;
+}
+
+export class JekyllEngine {
+  constructor(options = {}) {
+    this.options = {
+      logger: options.logger || noop,
+      stdout: options.stdout || null,
+      cache: options.cache !== false,
+      ...options,
+    };
+
+    this._config = {};
+    this._layouts = {};
+    this._includes = {};
+    this._data = {};
+    this._collections = {};
+    this._rootPages = [];
+    this._staticFiles = [];
+    this._sassAssets = [];
+    this.vfsTemplates = {};
+
+    this.liquidEngine = new Liquid({
+      root: '/',
+      cache: this.options.cache,
+      // FIX (#1 in review -- the most impactful bug): without this,
+      // LiquidJS's `dynamicPartials` defaults to `true`, which parses
+      // unquoted/`{{ }}`-interpolated include filenames as VARIABLE
+      // lookups instead of literal Jekyll-style filenames. Every
+      // `{% include foo.html %}` and `{% include {{ var }} %}` call in
+      // the VFS templates was broken without this option.
+      dynamicPartials: false,
+      jekyllInclude: true,
+      jekyllWhere: true,
+      relativeReference: false, // not needed for this flat VFS; avoids a console warning
+      fs: {
+        resolve: (root, file, ext) => {
+          return file;
+        },
+        readFile: async (file) => {
+          const cleanFile = this._resolveVfsPath(file);
+          if (this.vfsTemplates[cleanFile] !== undefined) {
+            return this.vfsTemplates[cleanFile];
+          }
+          throw new Error(`Template not resolved: ${file}`);
+        },
+        readFileSync: (file) => {
+          const cleanFile = this._resolveVfsPath(file);
+          if (this.vfsTemplates[cleanFile] !== undefined) {
+            return this.vfsTemplates[cleanFile];
+          }
+          throw new Error(`Template not resolved: ${file}`);
+        },
+        exists: async (file) => {
+          const cleanFile = this._resolveVfsPath(file);
+          return this.vfsTemplates[cleanFile] !== undefined;
+        },
+        existsSync: (file) => {
+          const cleanFile = this._resolveVfsPath(file);
+          return this.vfsTemplates[cleanFile] !== undefined;
+        },
+      },
+    });
+
+    this._setupDefaultFilters();
+    // FIX: register all Jekyll-specific tags (highlight, link, post_url,
+    // seo/feed_meta stubs) and filter fixes (to_integer float truncation)
+    // that LiquidJS either lacks or gets subtly wrong.
+    registerJekyllExtensions(this.liquidEngine);
+    if (options.vfs) this.useVFS(options.vfs);
+  }
+
+  _resolveVfsPath(file) {
+    let cleaned = file.replace(/^\//, '');
+    if (this.vfsTemplates[cleaned] !== undefined) {
+      return cleaned;
+    }
+
+    const layoutPath = `_layouts/${cleaned}`;
+    if (this.vfsTemplates[layoutPath] !== undefined) {
+      return layoutPath;
+    }
+
+    const includePath = `_includes/${cleaned}`;
+    if (this.vfsTemplates[includePath] !== undefined) {
+      return includePath;
+    }
+
+    return cleaned;
+  }
+
+  // FIX (#3 in review -- filter overrides reducing parity):
+  // The original registered hand-rolled `slugify`, `date_to_string`,
+  // `date_to_xmlschema`, `truncate`, `upcase`, `downcase`, `strip_html`,
+  // and `date`/`dates` filters that SHADOWED LiquidJS's own built-ins --
+  // which are themselves already ported from (or spec-compatible with)
+  // Jekyll/Liquid and more correct than the overrides were:
+  //   - slugify: ignored Jekyll's mode arg, used ASCII \w (kept "_")
+  //   - date_to_string: produced US "Jun 20, 2026" not Jekyll's UK
+  //     "20 Jun 2026"
+  //   - date_to_xmlschema: used toISOString() (UTC, ms, "Z") not
+  //     Jekyll's local-offset, no-ms "+00:00" format
+  //   - truncate: didn't count the ellipsis inside the length budget,
+  //     per standard Liquid spec
+  // All of those are deleted here -- LiquidJS's built-ins handle them.
+  // Only filters LiquidJS genuinely lacks are registered below.
+  _setupDefaultFilters() {
+    const filters = {
+      // FIX (#7 -- relative_url/absolute_url/strip_index missing or broken):
+      relative_url: (input) => computeRelativeUrl(input, this._config),
+      absolute_url: (input) => computeAbsoluteUrl(input, this._config),
+      strip_index: (input) => stripIndex(input),
+      // FIX (#6 -- no inline `markdownify` filter existed, only the
+      // page-level .md -> HTML conversion step):
+      markdownify: (input) => parseMarkdown(input),
+    };
+
+    for (const [name, fn] of Object.entries(filters)) {
+      this.liquidEngine.registerFilter(name, fn);
+    }
+  }
+
+  useVFS(vfs) {
+    this._config = {};
+    this._layouts = {};
+    this._includes = {};
+    this._data = {};
+    this._collections = {};
+    this._rootPages = [];
+    this._staticFiles = [];
+    this._sassAssets = [];
+    this.vfsTemplates = {};
+
+    // FIX (generic collections support): parse _config.yml in a
+    // dedicated pre-pass, regardless of where it falls in the VFS
+    // object's key order. Without this, if a collection's files happened
+    // to be listed (in insertion order) before _config.yml, we wouldn't
+    // yet know that directory was a declared collection when we reached
+    // it in the main loop below.
+    for (const [path, content] of Object.entries(vfs)) {
+      if (path === '_config.yml' || path === '_config.yaml') {
+        try {
+          this._config = yaml.load(content) || {};
+        } catch (e) {}
+        break;
+      }
+    }
+    this._collectionsConfig = normalizeCollectionsConfig(this._config.collections);
+
+    for (const [path, content] of Object.entries(vfs)) {
+      this.vfsTemplates[path] = content;
+
+      if (path === '_config.yml' || path === '_config.yaml') {
+        continue; // already parsed above
+      }
+      if (path.startsWith('_layouts/')) {
+        this._layouts[path.replace('_layouts/', '')] = content;
+        continue;
+      }
+      if (path.startsWith('_includes/')) {
+        this._includes[path.replace('_includes/', '')] = content;
+        continue;
+      }
+      if (path.startsWith('_data/')) {
+        try {
+          const name = path.replace('_data/', '').replace(/\.[^/.]+$/, '');
+          this._data[name] = yaml.load(content);
+        } catch (e) {}
+        continue;
+      }
+
+      // FIX (.markdown posts): Jekyll accepts both `.md` and `.markdown`
+      // as post file extensions. The original `parsePostFilename` only
+      // matched `.md`.
+      if (path.includes('_posts/')) {
+        const postsIndex = path.indexOf('_posts/');
+        const filename = path.slice(postsIndex + '_posts/'.length);
+        const parsed = parsePostFilename(filename);
+        try {
+          const { attributes, body } = fm(content);
+
+          const postCategories = getPostCategories(attributes, path);
+          const postTags = getPostTags(attributes);
+
+          attributes.categories = postCategories;
+          attributes.tags = postTags;
+
+          const permalink = generatePermalink(attributes, parsed?.slug, parsed?.date, this._config);
+          this._collections.posts ||= [];
+          this._collections.posts.push({
+            path,
+            content,
+            ...attributes,
+            categories: postCategories,
+            tags: postTags,
+            _body: body,
+            _permalink: permalink,
+            _date: attributes.date || parsed?.date,
+            _slug: parsed?.slug,
+            // FIX (excerpt_separator was hardcoded): front matter wins
+            // over site config, which wins over Jekyll's own default of
+            // "\n\n" -- mirrors Document#excerpt_separator exactly.
+            _excerptSeparator: attributes.excerpt_separator || this._config.excerpt_separator || '\n\n',
+          });
+        } catch (e) {}
+        continue;
+      }
+
+      // FIX (generic collections, previously entirely unimplemented):
+      // any directory declared under _config.yml's `collections:` key
+      // (besides the implicit "posts" collection, handled above) is now
+      // scanned the same way Jekyll itself does -- front matter parsed,
+      // a default `/:collection/:path/` permalink computed (or a custom
+      // one from "https://esm.sh/collections.<name>.permalink"), front matter `permalink:`
+      // still taking precedence as usual.
+      const collectionName = Object.keys(this._collectionsConfig).find((name) =>
+        path.includes(`_${name}/`)
+      );
+      if (collectionName) {
+        const prefix = `_${collectionName}/`;
+        const relPath = path.slice(path.indexOf(prefix) + prefix.length);
+        try {
+          const { attributes, body } = fm(content);
+          const permalink = generateCollectionPermalink(
+            attributes,
+            collectionName,
+            relPath,
+            this._collectionsConfig[collectionName]
+          );
+          this._collections[collectionName] ||= [];
+          this._collections[collectionName].push({
+            path,
+            content,
+            ...attributes,
+            _body: body,
+            _permalink: permalink,
+            _relPath: relPath,
+          });
+        } catch (e) {}
+        continue;
+      }
+
+      // FIX (.markdown extension): Jekyll supports both .md and .markdown
+      // as Markdown file extensions. The original only checked for .md in
+      // the root page branch.
+      if (/\.(md|markdown|html|liquid)$/i.test(path) && !path.includes('/')) {
+        this._rootPages.push({ path, content });
+        continue;
+      }
+
+      // FIX (site.static_files was entirely unimplemented): anything
+      // else -- images, CSS, JS, or any other asset dropped into the
+      // VFS -- is tracked as a static file, exposing the same field set
+      // real Jekyll's StaticFileDrop does: name, extname, basename,
+      // path, modified_time.
+      //
+      // Adaptation (documented limitation): nested page-like files
+      // (e.g. "docs/intro.md") are deliberately excluded from this --
+      // they're a separate, pre-existing gap (nested pages aren't
+      // discovered as pages at all yet) and miscategorizing them as
+      // "static files" would be worse than leaving that gap visible.
+      // There's also no real filesystem here, so `modified_time` is the
+      // time the VFS was scanned, not a tracked per-file mtime.
+      // FIX (SCSS assets pipeline): any file in assets/ with a .scss or
+      // .sass extension and front matter is handled by the Sass compiler,
+      // not treated as a static file. Track it for compilation in build().
+      if (isSassAsset(path, content)) {
+        this._sassAssets.push({ path, content });
+        continue;
+      }
+
+      if (!/\.(md|markdown|html|htm|liquid)$/i.test(path)) {
+        const slashIdx = path.lastIndexOf('/');
+        const name = slashIdx === -1 ? path : path.slice(slashIdx + 1);
+        const extname = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
+        const basename = extname ? name.slice(0, -extname.length) : name;
+        this._staticFiles.push({
+          name,
+          extname,
+          basename,
+          path: `/${path}`,
+          modified_time: new Date(),
+        });
+        continue;
+      }
+    }
+
+    if (this._collections.posts) {
+      this._collections.posts.sort((a, b) => new Date(b._date) - new Date(a._date));
+    }
+
+    return this;
+  }
+
+  // FIX (#9 in review -- site.pages didn't exist):
+  // root-level pages (index.md, about.md, blog.md, ...) were parsed into
+  // `this._rootPages` but never exposed to templates. `{% for page in
+  // site.pages %}` returned nothing. They're now mapped the same way
+  // collections are, with front matter parsed and a `url` resolved.
+  _buildRootPagesSummary() {
+    return this._rootPages.map((p) => {
+      const { attributes, body } = fm(p.content);
+      const url =
+        attributes.permalink ||
+        (p.path === 'index.md' || p.path === 'index.markdown' || p.path === 'index.html' ? '/' : `/${p.path.replace(/\.[^/.]+$/, '')}/`);
+      return {
+        ...attributes,
+        path: p.path,
+        url,
+        content: body,
+      };
+    });
+  }
+
+  _buildSiteContext(currentPost = null) {
+    // FIX (custom front-matter fields were silently dropped from
+    // site.posts): the original hardcoded a narrow whitelist (title,
+    // url, date, author, excerpt, content, tags, categories) when
+    // mapping posts for templates. Any other front-matter field --
+    // `listing-order`, `image`, `subtitle`, anything -- was discarded,
+    // so `{{ post.image }}` or `{% assign s = site.posts | sort:
+    // "listing-order" %}` silently did nothing. Real Jekyll exposes ALL
+    // front matter on a post. Now we spread everything through and only
+    // override the handful of computed fields.
+    const posts = (this._collections.posts || []).map((p) => {
+      const { _body, _permalink, _date, _slug, _excerptSeparator, content: _rawContent, ...rest } = p;
+      return {
+        ...rest,
+        url: _permalink,
+        date: _date,
+        // Also fixes a dead `p._excerpt` reference (that field was never
+        // actually set anywhere) -- a real front-matter `excerpt:`
+        // override (now living in `rest.excerpt`) is respected first.
+        // FIX: excerpt now respects a configurable excerpt_separator
+        // (front matter > site config > Jekyll's own "\n\n" default)
+        // instead of always splitting on a blank line.
+        excerpt: rest.excerpt || (_body ? parseMarkdown(extractExcerpt(_body, _excerptSeparator)) : ''),
+        content: _body,
+      };
+    });
+
+    const tagsMap = {};
+    const categoriesMap = {};
+
+    posts.forEach((post) => {
+      if (post.tags) {
+        const list = Array.isArray(post.tags) ? post.tags : [post.tags];
+        list.forEach((tag) => {
+          tagsMap[tag] ||= [];
+          tagsMap[tag].push(post);
+        });
+      }
+      if (post.categories) {
+        const list = Array.isArray(post.categories) ? post.categories : [post.categories];
+        list.forEach((cat) => {
+          categoriesMap[cat] ||= [];
+          categoriesMap[cat].push(post);
+        });
+      }
+    });
+
+    // FIX (site.related_posts was entirely unimplemented): only
+    // computed when rendering an actual post (mirrors real Jekyll's
+    // SiteDrop#related_posts returning nil unless the document
+    // currently being rendered is a Document/Post). A developer-
+    // supplied `relatedPostsFn` (constructor option) fully overrides
+    // the default "most recent posts" algorithm.
+    let relatedPosts;
+    if (currentPost) {
+      const currentPostMapped = posts.find((p) => p.path === currentPost.path);
+      if (currentPostMapped) {
+        const fn = this.options.relatedPostsFn || defaultRelatedPosts;
+        relatedPosts = fn(currentPostMapped, posts);
+      }
+    }
+
+    // FIX (generic collections): items pushed by the new collection-
+    // scanning logic in useVFS carry the same `_body`/`_permalink`
+    // bookkeeping fields posts do, so they get the same treatment here
+    // (full front matter preserved, internal fields cleaned up, real
+    // body used as `content`).
+    const mappedCollections = Object.fromEntries(
+      Object.entries(this._collections).map(([name, pages]) => {
+        if (name === 'posts') return [name, posts];
+        return [
+          name,
+          pages.map((p) => {
+            const { _body, _permalink, _relPath, content: _rawContent, ...rest } = p;
+            return {
+              ...rest,
+              url: rest.permalink || _permalink || `/${name}/${(_relPath || p.path).replace(/\.[^/.]+$/, '')}/`,
+              path: p.path,
+              content: _body,
+              collection: name,
+            };
+          }),
+        ];
+      })
+    );
+
+    const pages = this._buildRootPagesSummary();
+    // FIX (site.html_pages was entirely unimplemented): mirrors real
+    // Jekyll's SiteDrop#html_pages predicate exactly (`page.html? ||
+    // page.url.end_with?("/")`) -- adapted since this engine has no
+    // separate "output extension" concept: a page counts as HTML if its
+    // resolved url ends with ".html" or with "/".
+    const htmlPages = pages.filter((p) => p.url.endsWith('.html') || p.url.endsWith('/'));
+
+    return {
+      site: {
+        ...this._config,
+        data: this._data,
+        tags: tagsMap,
+        categories: categoriesMap,
+        pages, // FIX (#9)
+        html_pages: htmlPages, // FIX (site.html_pages)
+        static_files: this._staticFiles, // FIX (site.static_files)
+        related_posts: relatedPosts, // FIX (site.related_posts)
+        ...mappedCollections,
+      },
+    };
+  }
+
+  // FIX (layout names without a file extension didn't resolve): real
+  // Jekyll front matter conventionally writes `layout: post`, NOT
+  // `layout: post.html` -- Jekyll resolves this against
+  // `_layouts/post.html` (or `.htm`) automatically. The original lookup
+  // was a literal `this._layouts[layoutName]`, which only worked if
+  // someone wrote the full filename with extension. Confirmed via the
+  // real minima theme: every one of its layouts and every post in a
+  // freshly-scaffolded `jekyll new` site uses the extension-less form,
+  // so without this fix NO theme using normal Jekyll conventions would
+  // ever have its layout applied.
+  _resolveLayout(layoutName) {
+    if (this._layouts[layoutName] !== undefined) return this._layouts[layoutName];
+    if (this._layouts[`${layoutName}.html`] !== undefined) return this._layouts[`${layoutName}.html`];
+    if (this._layouts[`${layoutName}.htm`] !== undefined) return this._layouts[`${layoutName}.htm`];
+    return undefined;
+  }
+
+  async _applyLayouts(html, layoutName, ctx) {
+    const visited = new Set();
+    while (layoutName && !visited.has(layoutName)) {
+      visited.add(layoutName);
+      const layoutContent = this._resolveLayout(layoutName);
+      if (!layoutContent) break;
+      const { attributes: fmLayout, body: layoutBody } = fm(layoutContent);
+      html = await this.liquidEngine.parseAndRender(layoutBody, { ...ctx, content: html });
+      layoutName = fmLayout.layout;
+    }
+    return html;
+  }
+
+  async _renderPage(path, content, isPost = false, postMeta = null, paginator = null, overridePermalink = null) {
+    const { attributes, body } = fm(content);
+    // FIX (site.related_posts): pass the current post through so
+    // _buildSiteContext can compute related_posts contextually, exactly
+    // like real Jekyll scopes `site.related_posts` to whichever
+    // document is currently being rendered.
+    const siteCtx = this._buildSiteContext(postMeta);
+
+    let localPermalink = overridePermalink || attributes.permalink;
+    if (!localPermalink) {
+      if (isPost && postMeta) {
+        localPermalink = postMeta._permalink;
+      } else if (path === 'index.md' || path === 'index.markdown' || path === 'index.html') {
+        localPermalink = '/';
+      } else {
+        localPermalink = `/${path.replace(/\.[^/.]+$/, '')}/`;
+      }
+    }
+
+    const pageCtx = {
+      ...siteCtx,
+      page: {
+        ...attributes,
+        path,
+        url: localPermalink,
+      },
+      // FIX (jekyll.environment was never injected): minima and many other
+      // themes gate Google Analytics and Disqus behind
+      // `if jekyll.environment == "production"`. Without this, the
+      // condition always evaluates to false (undefined != "production"),
+      // so GA/Disqus blocks are silently absent. This engine defaults to
+      // "development", matching `jekyll serve` behaviour. Pass
+      // `options.environment` to the constructor to override.
+      jekyll: {
+        environment: this.options.environment || 'development',
+        version: '4.3.2',
+      },
+    };
+    // FIX (pagination was entirely unimplemented): exposes `paginator`
+    // in the template context exactly like real Jekyll does for a
+    // paginated index page.
+    if (paginator) pageCtx.paginator = paginator;
+
+    let rendered = await this.liquidEngine.parseAndRender(body, pageCtx);
+
+    // FIX (.markdown extension): also convert .markdown files to HTML,
+    // not just .md files.
+    if (path.endsWith('.md') || path.endsWith('.markdown')) {
+      rendered = parseMarkdown(rendered);
+    }
+
+    if (attributes.layout || postMeta?.layout) {
+      rendered = await this._applyLayouts(rendered, attributes.layout || postMeta.layout, pageCtx);
+    }
+
+    return {
+      path,
+      permalink: localPermalink,
+      data: attributes,
+      content: rendered,
+      ...(paginator ? { paginator } : {}),
+    };
+  }
+
+  // FIX (pagination was entirely unimplemented). See the `buildPaginators`
+  // module-level function's comment for the template-page-selection
+  // adaptation made for this VFS-based engine.
+  _computePagination(allPosts) {
+    const perPage = parseInt(this._config.paginate, 10);
+    if (!this._config.paginate || !Number.isFinite(perPage) || perPage <= 0) return null;
+    if (this._rootPages.length === 0) return null;
+
+    const rootSummaries = this._buildRootPagesSummary();
+    const templateSummary = rootSummaries.find((p) => p.url === '/');
+    if (!templateSummary) {
+      this.options.logger(
+        "Pagination: couldn't find an index page to use as the pagination template. Skipping pagination.",
+        'warn'
+      );
+      return null;
+    }
+
+    const postsForPagination = allPosts.filter((p) => !p.hidden); // mirrors `all_posts.reject { |p| p['hidden'] }`
+    const paginatePathPattern = this._config.paginate_path || '/page:num';
+    const pagers = buildPaginators(postsForPagination, perPage, paginatePathPattern, templateSummary.url);
+
+    return { templatePath: templateSummary.path, pagers };
+  }
+
+  async build() {
+    this.options.logger('Compiling resource dependency nodes...', 'info');
+    const results = [];
+
+    // Posts are needed up front for pagination math, regardless of
+    // which root page ends up rendering first.
+    const postsForPagination = this._buildSiteContext().site.posts;
+    const pagination = this._computePagination(postsForPagination);
+
+    for (const page of this._rootPages) {
+      this.options.logger(`Parsing base layer: ${page.path}`, 'info');
+      const isPaginationTemplate = pagination && pagination.templatePath === page.path;
+      const result = await this._renderPage(
+        page.path,
+        page.content,
+        false,
+        null,
+        isPaginationTemplate ? pagination.pagers[0] : null
+      );
+      results.push(result);
+      if (this.options.stdout) this.options.stdout(result);
+    }
+
+    // FIX (pagination): synthesize page2, page3, ... by re-rendering the
+    // template page's own content/layout with a different `paginator`
+    // and a different permalink (computed from "https://esm.sh/paginate_path") --
+    // mirrors how jekyll-paginate's generator clones a new Page per
+    // extra pager.
+    if (pagination) {
+      const templatePage = this._rootPages.find((p) => p.path === pagination.templatePath);
+      for (let i = 1; i < pagination.pagers.length; i++) {
+        const pager = pagination.pagers[i];
+        this.options.logger(`Generating paginated page ${pager.page}`, 'info');
+        const result = await this._renderPage(
+          templatePage.path,
+          templatePage.content,
+          false,
+          null,
+          pager,
+          pager.page_path
+        );
+        results.push(result);
+        if (this.options.stdout) this.options.stdout(result);
+      }
+    }
+
+    for (const [name, pages] of Object.entries(this._collections)) {
+      // FIX (collection `output: false` wasn't respected -- and real
+      // Jekyll's actual default is `output: false`, i.e. collection
+      // items are NOT rendered as standalone files unless you opt in
+      // with `output: true`. Only `posts` is special-cased to always
+      // render, matching real Jekyll exactly.
+      const shouldOutput = name === 'posts' || this._collectionsConfig[name]?.output === true;
+      if (!shouldOutput) continue;
+
+      for (const page of pages) {
+        this.options.logger(`Processing collection item -> ${page.path}`, 'info');
+        const result = await this._renderPage(page.path, page.content, true, page);
+        results.push(result);
+        if (this.options.stdout) this.options.stdout(result);
+      }
+    }
+
+    this.options.logger(`Engine fully rendered ${results.length} virtual files.`, 'success');
+
+    // FIX (SCSS assets pipeline): compile all tracked SCSS/Sass assets.
+    // Done after template rendering so the full VFS (including any
+    // theme _sass/ partials) is already loaded.
+    for (const asset of this._sassAssets) {
+      this.options.logger(`Compiling Sass: ${asset.path}`, 'info');
+      const compiled = compileSassAsset(asset.path, asset.content, this.vfsTemplates, this._config);
+      const cssResult = {
+        path: asset.path,
+        permalink: compiled.permalink,
+        data: {},
+        content: compiled.css,
+      };
+      results.push(cssResult);
+      if (this.options.stdout) this.options.stdout(cssResult);
+    }
+
+    return results;
+  }
+}
+
+// Exported for direct testing / reuse
+export {
+  slugify,
+  computeRelativeUrl,
+  computeAbsoluteUrl,
+  stripIndex,
+  parseMarkdown,
+  getPostCategories,
+  getPostTags,
+  parsePostFilename,
+  generatePermalink,
+  normalizeCollectionsConfig,
+  generateCollectionPermalink,
+  defaultRelatedPosts,
+  extractExcerpt,
+  buildPaginators,
+};
+
+    // -------------------------------------------------------------
+    // Application Controller & State
+    // -------------------------------------------------------------
+    let vfs = JSON.parse(JSON.stringify(defaultVFS));
+    let currentFile = "index.md";
+    let activeOutputTab = "preview";
+    let compiledPages = [];
+    let consoleLogs = [];
+    let aceEditorInstance = null;
+
+    // Grab elements
+    const workspaceSidebar = document.getElementById('workspace-sidebar');
+    const workspaceEditor = document.getElementById('workspace-editor');
+    const workspacePreview = document.getElementById('workspace-preview');
+    const activeFileBreadcrumb = document.getElementById('active-file-breadcrumb');
+    const activeFileStatus = document.getElementById('active-file-status');
+    const editorCursorPos = document.getElementById('editor-cursor-pos');
+    
+    const previewFrame = document.getElementById('preview-frame');
+    const previewPath = document.getElementById('preview-path');
+    const htmlContent = document.getElementById('html-content');
+    const jsonContent = document.getElementById('json-content');
+    const consoleContent = document.getElementById('console-content');
+    const buildBtn = document.getElementById('btn-build');
+    const buildIcon = document.getElementById('build-icon');
+    const buildText = document.getElementById('build-text');
+    const modalAdd = document.getElementById('modal-add');
+    const newFilePath = document.getElementById('new-file-path');
+
+    // -------------------------------------------------------------
+    // Initialize Ace Editor
+    // -------------------------------------------------------------
+    function setupAceEditor() {
+      ace.config.set('basePath', 'https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/');
+      
+      aceEditorInstance = ace.edit("editor");
+      aceEditorInstance.setTheme("ace/theme/tomorrow_night_eighties");
+      aceEditorInstance.setOptions({
+        fontFamily: "JetBrains Mono, monospace",
+        fontSize: "13px",
+        showPrintMargin: false,
+        useSoftTabs: true,
+        tabSize: 2,
+        wrap: true,
+        enableBasicAutocompletion: true,
+        enableLiveAutocompletion: true,
+        vScrollBarAlwaysVisible: false
+      });
+
+      // Synchronize editor alterations directly to local VFS Memory
+      aceEditorInstance.getSession().on('change', () => {
+        const newVal = aceEditorInstance.getValue();
+        if (vfs[currentFile] !== newVal) {
+          vfs[currentFile] = newVal;
+          activeFileStatus.textContent = 'MODIFIED';
+          activeFileStatus.className = 'text-[10px] font-semibold text-amber-400 font-mono tracking-wider uppercase';
+        }
+      });
+
+      // Cursor position visual mapping
+      aceEditorInstance.getSelection().on('changeCursor', () => {
+        const pos = aceEditorInstance.getCursorPosition();
+        editorCursorPos.textContent = `Ln ${pos.row + 1}, Col ${pos.column + 1}`;
+      });
+
+      syncEditorFile(currentFile);
+    }
+
+    function syncEditorFile(filename) {
+      if (!aceEditorInstance) return;
+      currentFile = filename;
+      activeFileBreadcrumb.textContent = filename;
+      
+      let mode = 'ace/mode/markdown';
+      if (filename.endsWith('.html')) mode = 'ace/mode/html';
+      else if (filename.endsWith('.yml') || filename.endsWith('.yaml') || filename === '_config.yml') {
+        mode = 'ace/mode/yaml';
+      }
+      
+      aceEditorInstance.getSession().setMode(mode);
+      aceEditorInstance.setValue(vfs[filename] || '', -1);
+      
+      activeFileStatus.textContent = 'READY';
+      activeFileStatus.className = 'text-[10px] font-semibold text-slate-500 font-mono tracking-wider uppercase';
+    }
+
+    // -------------------------------------------------------------
+    // Nested Directory Sidebar Visual Tree Representation
+    // -------------------------------------------------------------
+    function setupFileTree() {
+      const container = document.getElementById('vfs-tree-root');
+      container.innerHTML = '';
+
+      const rootMap = {};
+      Object.keys(vfs).sort().forEach(path => {
+        const steps = path.split('/');
+        let cursor = rootMap;
+        steps.forEach((step, idx) => {
+          if (idx === steps.length - 1) {
+            cursor[step] = { _type: 'file', filepath: path };
+          } else {
+            cursor[step] ||= { _type: 'dir', children: {} };
+            cursor = cursor[step].children;
+          }
+        });
+      });
+
+      function renderItem(name, obj, depth = 0) {
+        const div = document.createElement('div');
+        const paddingLeft = `style="padding-left: ${depth * 10 + 6}px;"`;
+
+        if (obj._type === 'file') {
+          const isActive = obj.filepath === currentFile;
+          div.className = `flex items-center gap-2 py-1.5 px-2 rounded-md text-xs font-mono cursor-pointer transition-all ${
+            isActive 
+              ? 'bg-cyan-950/80 border-l-2 border-cyan-400 text-cyan-300 font-semibold' 
+              : 'text-slate-300 hover:bg-slate-800/40 hover:text-white'
+          }`;
+          
+          let icon = '📄';
+          if (obj.filepath === '_config.yml') icon = '⚙️';
+          else if (obj.filepath.endsWith('.html')) icon = '🌐';
+
+          div.innerHTML = `<span class="text-xs shrink-0">${icon}</span> <span class="truncate">${name}</span>`;
+          div.onclick = () => {
+            syncEditorFile(obj.filepath);
+            setupFileTree();
+            
+            if (window.innerWidth < 1024) {
+              showMobilePane('editor');
+            }
+          };
+          return div;
+        } else {
+          const dirWrap = document.createElement('div');
+          dirWrap.className = 'space-y-0.5';
+          
+          const header = document.createElement('div');
+          header.className = `flex items-center gap-2 py-1 px-2 text-xs font-semibold text-slate-400 font-mono select-none`;
+          header.innerHTML = `<span>📁</span> <span class="tracking-wide uppercase text-[10px] text-slate-500">${name}</span>`;
+          
+          dirWrap.appendChild(header);
+
+          const childContainer = document.createElement('div');
+          childContainer.className = 'border-l border-slate-800/60 ml-2.5';
+          
+          Object.entries(obj.children).forEach(([cName, cObj]) => {
+            childContainer.appendChild(renderItem(cName, cObj, depth + 1));
+          });
+          dirWrap.appendChild(childContainer);
+          return dirWrap;
+        }
+      }
+
+      const dirs = [];
+      const files = [];
+
+      Object.entries(rootMap).forEach(([name, obj]) => {
+        if (obj._type === 'file') files.push({name, obj});
+        else dirs.push({name, obj});
+      });
+
+      dirs.forEach(item => container.appendChild(renderItem(item.name, item.obj, 0)));
+      files.forEach(item => container.appendChild(renderItem(item.name, item.obj, 0)));
+    }
+
+    // -------------------------------------------------------------
+    // Dynamic Log Printer
+    // -------------------------------------------------------------
+    function log(level, message) {
+      const time = new Date().toLocaleTimeString();
+      const levelColors = {
+        info: 'text-slate-400',
+        warn: 'text-amber-400',
+        error: 'text-rose-400',
+        success: 'text-cyan-400 font-bold'
+      };
+      
+      consoleLogs.push({ time, level, message });
+      consoleContent.innerHTML = consoleLogs.map(item => 
+        `<div class="flex gap-2 leading-relaxed"><span class="text-slate-600 shrink-0">[${item.time}]</span><span class="${levelColors[item.level]}">${item.message}</span></div>`
+      ).join('');
+      consoleContent.scrollTop = consoleContent.scrollHeight;
+    }
+
+    // -------------------------------------------------------------
+    // Build Trigger System
+    // -------------------------------------------------------------
+    async function executeCompile() {
+      buildBtn.disabled = true;
+      buildText.textContent = 'Compiling...';
+      buildIcon.classList.add('animate-spin');
+      
+      consoleLogs = [];
+      log('info', 'Starting runtime build process...');
+
+      await new Promise(r => setTimeout(r, 400));
+
+      try {
+        const engine = new JekyllEngine({
+          vfs: vfs,
+          logger: (msg, lvl) => log(lvl, msg),
+          stdout: (msg, lvl) => console.log(msg),
+        });
+
+        compiledPages = await engine.build();
+
+        updateLivePreviewFrame();
+        updateCompiledHTMLPane();
+        updateJSONOutputPane();
+
+      } catch (err) {
+        log('error', `Build Pipeline Aborted: ${err.message}`);
+      } finally {
+        buildBtn.disabled = false;
+        buildText.textContent = 'Build Pages';
+        buildIcon.classList.remove('animate-spin');
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Sandbox Navigation Router & Interceptor
+    // -------------------------------------------------------------
+    function findPageByHref(href, pages) {
+      if (!href) return null;
+      let cleaned = href.trim();
+console.log(pages)
+      try {
+        const urlObj = new URL(cleaned, window.location.href);
+        if (urlObj.origin === window.location.origin) {
+          cleaned = urlObj.pathname;
+        }
+      } catch(e) {
+        console.log(e)
+        
+      }
+
+      let match = pages.find(p => p.permalink === cleaned || p.permalink === cleaned + '/' || p.permalink === '/' + cleaned);
+      if (match) return match;
+
+      const cleanTarget = cleaned.replace(/\/$/, '').replace(/\/index\.html$/, '').replace(/^\//, '');
+      
+      return pages.find(p => {
+        const cleanPerm = p.permalink.replace(/\/$/, '').replace(/\/index\.html$/, '').replace(/^\//, '');
+        return cleanPerm === cleanTarget;
+      });
+    }
+
+    function injectSandboxRouterInterceptors(iframe) {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        const links = iframeDoc.getElementsByTagName('a');
+
+        for (let link of links) {
+          const href = link.getAttribute('href');
+          
+          if (!href || href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//')) {
+            link.setAttribute('target', '_blank');
+            continue;
+          }
+
+          link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const matched = findPageByHref(href, compiledPages);
+            if (matched) {
+              log('info', `Local navigation route triggered -> ${matched.permalink}`);
+              renderPreviewPageContent(matched);
+            } else {
+              log('warn', `Internal route not compiled: "${href}"`);
+            }
+          });
+        }
+      } catch (err) {
+        console.error("Interceptor failed injecting sandbox bindings:", err);
+      }
+    }
+
+    function renderPreviewPageContent(pageObj) {
+      previewPath.textContent = pageObj.permalink;
+
+      const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
+      doc.open();
+      doc.write(pageObj.content);
+      doc.close();
+
+      injectSandboxRouterInterceptors(previewFrame);
+    }
+
+    function updateLivePreviewFrame() {
+      if (compiledPages.length === 0) return;
+      
+      const home = compiledPages.find(p => p.permalink === '/' || p.permalink === '/index.html' || p.path === 'index.md') || compiledPages[0];
+      renderPreviewPageContent(home);
+    }
+
+    // Formatter used strictly for raw text presentation inside the 'Compiled HTML' tab
+    function updateCompiledHTMLPane() {
+      if (compiledPages.length === 0) {
+        htmlContent.textContent = 'Resource empty.';
+        return;
+      }
+      const home = compiledPages.find(p => p.permalink === '/' || p.permalink === '/index.html' || p.path === 'index.md') || compiledPages[0];
+      
+      htmlContent.textContent = formatHTML(home.content);
+    }
+
+    function updateJSONOutputPane() {
+      jsonContent.textContent = JSON.stringify(compiledPages, null, 2);
+    }
+
+    function formatHTML(html) {
+      let formatted = '';
+      let indent = '';
+      const tab = '  ';
+      html.split(/></).forEach((element, i) => {
+        if (i > 0) element = '<' + element;
+        if (i < html.split(/></).length - 1) element = element + '>';
+
+        if (element.match(/^\s*<\/\w/)) indent = indent.substring(tab.length);
+        formatted += indent + element + '\n';
+        if (element.match(/^<\w[^>]*[^\/]>.*$/)) indent += tab;
+      });
+      return formatted;
+    }
+
+    // -------------------------------------------------------------
+    // Display Sandbox Theme Toggles
+    // -------------------------------------------------------------
+    document.getElementById('preview-light').addEventListener('click', () => {
+      previewFrame.style.backgroundColor = 'white';
+      document.getElementById('preview-light').className = 'px-2 py-0.5 rounded text-[10px] font-medium bg-slate-700 text-white transition-all';
+      document.getElementById('preview-dark').className = 'px-2 py-0.5 rounded text-[10px] font-medium text-slate-400 hover:text-white transition-all';
+    });
+
+    document.getElementById('preview-dark').addEventListener('click', () => {
+      previewFrame.style.backgroundColor = '#0f172a';
+      document.getElementById('preview-dark').className = 'px-2 py-0.5 rounded text-[10px] font-medium bg-slate-700 text-white transition-all';
+      document.getElementById('preview-light').className = 'px-2 py-0.5 rounded text-[10px] font-medium text-slate-400 hover:text-white transition-all';
+    });
+
+    // -------------------------------------------------------------
+    // Output Interface View Selector Tabs
+    // -------------------------------------------------------------
+    document.querySelectorAll('.output-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.tab;
+        activeOutputTab = target;
+
+        document.querySelectorAll('.output-tab').forEach(t => {
+          t.className = 'output-tab tab-inactive px-4 py-2.5 text-xs font-medium tracking-wide transition-all border-b-2 text-slate-400 hover:text-slate-200 border-transparent';
+        });
+        tab.className = 'output-tab tab-active px-4 py-2.5 text-xs font-semibold tracking-wide transition-all border-b-2 border-cyan-500 text-cyan-400 bg-slate-900/10';
+
+        document.querySelectorAll('.output-pane').forEach(p => p.classList.add('hidden'));
+        document.getElementById(`output-pane-${target}`).classList.remove('hidden');
+      });
+    });
+
+    // -------------------------------------------------------------
+    // File Manipulation Controls
+    // -------------------------------------------------------------
+    document.getElementById('btn-add-file').addEventListener('click', () => {
+      modalAdd.classList.remove('hidden');
+      newFilePath.focus();
+    });
+
+    document.getElementById('btn-cancel-add').addEventListener('click', () => {
+      modalAdd.classList.add('hidden');
+      newFilePath.value = '';
+    });
+
+    document.getElementById('btn-confirm-add').addEventListener('click', () => {
+      const path = newFilePath.value.trim();
+      if (path) {
+        if (!vfs[path]) {
+          vfs[path] = '';
+          syncEditorFile(path);
+          setupFileTree();
+        }
+        modalAdd.classList.add('hidden');
+        newFilePath.value = '';
+      }
+    });
+
+    document.getElementById('btn-delete-file').addEventListener('click', () => {
+      if (Object.keys(vfs).length <= 1) {
+        alert('Action aborted. At least one file must exist in workspace.');
+        return;
+      }
+      if (confirm(`Remove "${currentFile}" permanently from virtual storage?`)) {
+        delete vfs[currentFile];
+        const remaining = Object.keys(vfs)[0];
+        syncEditorFile(remaining);
+        setupFileTree();
+      }
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      if (confirm('Revert all files? This deletes custom items.')) {
+        vfs = JSON.parse(JSON.stringify(defaultVFS));
+        syncEditorFile('index.md');
+        setupFileTree();
+        log('info', 'Workspace reset completed.');
+      }
+    });
+
+    // Handle Modal Keybinds
+    newFilePath.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('btn-confirm-add').click();
+      if (e.key === 'Escape') document.getElementById('btn-cancel-add').click();
+    });
+
+    buildBtn.addEventListener('click', executeCompile);
+
+    // -------------------------------------------------------------
+    // Mobile Workframe Panes Control
+    // -------------------------------------------------------------
+    window.showMobilePane = function(paneId) {
+      const sidebar = document.getElementById('workspace-sidebar');
+      const editor = document.getElementById('workspace-editor');
+      const preview = document.getElementById('workspace-preview');
+
+      document.getElementById('mobile-tab-sidebar').className = "flex-1 py-2.5 text-center font-medium border-b-2 border-transparent text-slate-400";
+      document.getElementById('mobile-tab-editor').className = "flex-1 py-2.5 text-center font-medium border-b-2 border-transparent text-slate-400";
+      document.getElementById('mobile-tab-preview').className = "flex-1 py-2.5 text-center font-medium border-b-2 border-transparent text-slate-400";
+
+      sidebar.classList.add('hidden');
+      editor.classList.add('hidden');
+      preview.classList.add('hidden');
+
+      if (paneId === 'sidebar') {
+        sidebar.classList.remove('hidden');
+        document.getElementById('mobile-tab-sidebar').className = "flex-1 py-2.5 text-center font-semibold border-b-2 border-cyan-500 text-cyan-400 bg-slate-900/30";
+      } else if (paneId === 'editor') {
+        editor.classList.remove('hidden');
+        editor.classList.add('flex');
+        document.getElementById('mobile-tab-editor').className = "flex-1 py-2.5 text-center font-semibold border-b-2 border-cyan-500 text-cyan-400 bg-slate-900/30";
+        if (aceEditorInstance) aceEditorInstance.resize();
+      } else if (paneId === 'preview') {
+        preview.classList.remove('hidden');
+        preview.classList.add('flex');
+        document.getElementById('mobile-tab-preview').className = "flex-1 py-2.5 text-center font-semibold border-b-2 border-cyan-500 text-cyan-400 bg-slate-900/30";
+      }
+    };
+
+    window.addEventListener('resize', () => {
+      if (window.innerWidth >= 1024) {
+        document.getElementById('workspace-sidebar').classList.remove('hidden');
+        document.getElementById('workspace-editor').classList.remove('hidden'); 
+        document.getElementById('workspace-editor').classList.add('flex');
+        document.getElementById('workspace-preview').classList.remove('hidden');
+        document.getElementById('workspace-preview').classList.add('flex');
+      } else {
+        showMobilePane('editor');
+      }
+    });
+
+    // -------------------------------------------------------------
+    // Boot Initialization
+    // -------------------------------------------------------------
+    setupAceEditor();
+    setupFileTree();
+    
+    if (window.innerWidth < 1024) {
+      showMobilePane('editor');
+    }
+
+    setTimeout(() => executeCompile(), 300);
+  </script>
+</body>
+</html>
