@@ -39,4 +39,4 @@ Suite layout (run everything with `npm test` from the repo root):
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,
-  compared against the Jekyll 4.3.2 ground truth in `battletest/`).
+  compared against the Jekyll 4.3.2 ground truth in `test/battletest/`).
