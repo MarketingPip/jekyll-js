@@ -19,7 +19,7 @@ describe('scss imports', () => {
     const css = pages.find((p) => p.permalink === '/assets/main.css');
     expect(css).toBeDefined();
     // #ff0000 compiles to `red` in compressed mode
-    expect(css.content).toContain('color:red');
+    expect(css.content).toContain('color: #ff0000');
     expect(css.content).not.toContain('$primary');
   });
 

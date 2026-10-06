@@ -275,8 +275,12 @@ function registerSeoTag(engine) {
         let type = 'WebPage';
         if (page.date) {
           type = 'BlogPosting';
-        } else if (page.url && (page.url === '/' || page.url === '/index.html' || page.url === '/about/' || page.url === '/about.html')) {
-          type = 'WebSite';
+        } else if (page.url) {
+          // FIX (oracle-found): real gem uses HOMEPAGE_OR_ABOUT_REGEX =
+          // /^/(about/)?(index.html?)?$/ — matches /,/index.html,/about/,/about/index.html
+          // but NOT /about.html (without trailing slash)
+          const homepageOrAbout = /^\/(about\/)?(index\.html?)?$/.test(page.url);
+          if (homepageOrAbout) type = 'WebSite';
         }
         jsonLd['@type'] = type;
 
@@ -286,17 +290,19 @@ function registerSeoTag(engine) {
         // headline (page title)
         if (pageTitle) jsonLd.headline = pageTitle;
 
-        // name: site title for WebSite, page title otherwise
+        // name: only for WebSite (homepage/about). Real gem returns nil
+        // for other pages (drop.rb:76-87).
         if (type === 'WebSite') {
           if (site.title) jsonLd.name = site.title;
-        } else if (pageTitle) {
-          jsonLd.name = pageTitle;
         }
 
-        // url (canonical)
-        if (site.url) {
+        // url (canonical) - real gem always outputs, even without site.url
+        // (absolute_url returns just the path if no base URL configured)
+        {
           const canonical = (site.url || '') + (site.baseurl || '') + (page.url || '');
-          jsonLd.url = canonical;
+          // Real gem: filters.absolute_url(page["url"]).gsub(/\/index\.html$/, "/")
+          const normalized = canonical.replace(/\/index\.html$/, '/') || '/';
+          jsonLd.url = normalized;
         }
 
         // datePublished / dateModified

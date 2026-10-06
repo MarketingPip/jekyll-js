@@ -65,7 +65,9 @@ export function compileSassAsset(path, content, vfs, config = {}, sass) {
   // Strip front matter before passing to Sass (Sass doesn't understand ---)
   const stripped = content.replace(/^---[\s\S]*?---\n?/, '');
 
-  const sassStyle = config?.sass?.style || 'compressed';
+  // FIX (oracle-found): real Jekyll defaults to expanded, not compressed.
+  // jekyll-sass-converter/lib/jekyll/converters/scss.rb:110
+  const sassStyle = config?.sass?.style || 'expanded';
   const syntax = path.endsWith('.sass') ? 'indented' : 'scss';
 
   // Build a map of all _sass/ partials for the custom importer

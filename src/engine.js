@@ -19,6 +19,14 @@ import { registerJekyllExtensions } from './jekyllTags.js';
 import { isSassAsset, compileSassAsset } from './assetsPipeline.js';
 import { isFeedEnabled, generateFeeds } from './jekyllFeed.js';
 import { isSitemapEnabled, generateSitemap } from './jekyllSitemap.js';
+import { redirectFromPlugin } from './jekyllRedirectFrom.js';
+
+// Check if jekyll-redirect-from is enabled via plugins config
+function isRedirectFromEnabled(config) {
+  const plugins = config?.plugins || config?.gems || [];
+  const list = Array.isArray(plugins) ? plugins : [plugins];
+  return list.some((p) => p === 'jekyll-redirect-from' || p === 'jekyll_redirect_from');
+}
 
 const noop = () => {};
 
@@ -175,6 +183,31 @@ function escapeHtmlForMarkdown(str) {
 
 function parseMarkdown(md) {
   return mdParser.parse(String(md));
+}
+
+// FIX (oracle-found): real Jekyll interprets post dates as local midnight,
+// not UTC. `new Date("2026-01-02")` parses as UTC; we need local time.
+// This helper parses YYYY-MM-DD (and YYYY-MM-DD HH:MM:SS) as local.
+function parseLocalDate(dateStr) {
+  if (!dateStr) return null;
+  if (dateStr instanceof Date) return dateStr;
+  const s = String(dateStr).trim();
+  // Match YYYY-MM-DD or YYYY-MM-DD HH:MM:SS
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (m) {
+    const [, y, mo, d, h = '0', mi = '0', sec = '0'] = m;
+    return new Date(
+      parseInt(y, 10),
+      parseInt(mo, 10) - 1,
+      parseInt(d, 10),
+      parseInt(h, 10),
+      parseInt(mi, 10),
+      parseInt(sec, 10)
+    );
+  }
+  // Fallback: let Date parse it
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 // Resolves and normalizes categories following Jekyll standards
@@ -572,6 +605,35 @@ export class JekyllEngine {
       // FIX (#6 -- no inline `markdownify` filter existed, only the
       // page-level .md -> HTML conversion step):
       markdownify: (input) => parseMarkdown(input),
+      // FIX (oracle-found): LiquidJS's date_to_xmlschema outputs UTC
+      // (+00:00) for Date objects accessed via property (e.g., post.date).
+      // Real Jekyll outputs local offset (-05:00). Override to ensure
+      // local timezone is preserved.
+      date_to_xmlschema: (input) => {
+        let d;
+        if (input instanceof Date) {
+          d = input;
+        } else if (typeof input === 'string' || typeof input === 'number') {
+          d = parseLocalDate(input) || new Date(input);
+        } else {
+          // Fall back to LiquidJS built-in for other types
+          return this.liquidEngine.filters.date_to_xmlschema(input);
+        }
+        if (!d || isNaN(d.getTime())) return '';
+        // Format as YYYY-MM-DDTHH:MM:SS±HH:MM (local timezone)
+        const pad = (n) => String(n).padStart(2, '0');
+        const year = d.getFullYear();
+        const month = pad(d.getMonth() + 1);
+        const day = pad(d.getDate());
+        const hour = pad(d.getHours());
+        const min = pad(d.getMinutes());
+        const sec = pad(d.getSeconds());
+        const offset = -d.getTimezoneOffset();
+        const sign = offset >= 0 ? '+' : '-';
+        const offHour = pad(Math.floor(Math.abs(offset) / 60));
+        const offMin = pad(Math.abs(offset) % 60);
+        return `${year}-${month}-${day}T${hour}:${min}:${sec}${sign}${offHour}:${offMin}`;
+      },
     };
 
     for (const [name, fn] of Object.entries(filters)) {
@@ -1294,11 +1356,15 @@ export class JekyllEngine {
       // FIX (oracle-found): real Jekyll provides post.id (URL without extension,
       // e.g. /2026/01/02/second). The feed template uses {{ post.id }}.
       const id = _permalink ? _permalink.replace(/\.html$/, '').replace(/\/$/, '') : '';
+      // FIX (oracle-found): real Jekyll's post.date is a Time object with
+      // local timezone. We were passing a string which LiquidJS parsed as UTC.
+      // Parse as local midnight for correct date_to_xmlschema output.
+      const dateObj = parseLocalDate(_date);
       return {
         ...rest,
         url: _permalink,
         id,
-        date: _date,
+        date: dateObj || _date,
         // Also fixes a dead `p._excerpt` reference (that field was never
         // actually set anywhere) -- a real front-matter `excerpt:`
         // override (now living in `rest.excerpt`) is respected first.
@@ -1562,6 +1628,14 @@ export class JekyllEngine {
 
   async build() {
     await this._emit('pre:build', this);
+
+    // Auto-register built-in JS plugin ports when enabled in config.
+    // (Matches Ruby Jekyll's plugin loading via `plugins:` in _config.yml.)
+    if (isRedirectFromEnabled(this._config) && !this._redirectFromRegistered) {
+      this._redirectFromRegistered = true;
+      redirectFromPlugin(this);
+    }
+
     this.options.logger('Compiling resource dependency nodes...', 'info');
     const results = [];
 
