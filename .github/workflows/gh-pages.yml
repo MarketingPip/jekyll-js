@@ -25,8 +25,7 @@ jobs:
           cp dist/highlight-plugin.js playground/dist/
       # API docs via JSDoc
       - run: |
-          npx --yes jsdoc src/engine.js -d playground/api \
-            --template node_modules/jsdoc/templates/default
+          npx --yes jsdoc src/engine.js -d playground/api
       - uses: actions/upload-pages-artifact@v3
         with:
           path: playground/
