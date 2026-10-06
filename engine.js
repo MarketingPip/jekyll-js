@@ -421,6 +421,8 @@ export class JekyllEngine {
     // JS Plugin API state
     this._hooks = {};       // "owner:event" -> [fn]
     this._generators = [];  // [fn(site)]
+    this._collectionsConfig = {};  // normalized collection config
+    this._eventListeners = {};      // lifecycle events
     this._staticFiles = [];
     this._sassAssets = [];
     this.vfsTemplates = {};
@@ -657,6 +659,105 @@ export class JekyllEngine {
    */
   get utils() {
     return { slugify };
+  }
+
+  // ============================================================
+  // Fluent Builder API (programmatic site construction)
+  // Chainable; for API-only or hybrid (VFS + overrides) usage.
+  // Call after useVFS() if mixing — useVFS resets builder state.
+  // ============================================================
+
+  /**
+   * Merge config (object or YAML string).
+   */
+  setConfig(config) {
+    const parsed = typeof config === 'string' ? yaml.load(config) : config;
+    this._config = { ...this._config, ...parsed };
+    if (parsed.collections) {
+      this._collectionsConfig = normalizeCollectionsConfig(this._config.collections);
+    }
+    return this;
+  }
+
+  /**
+   * Add a layout. Name like 'default.html'.
+   */
+  addLayout(name, content) {
+    this._layouts[name] = content;
+    return this;
+  }
+
+  /**
+   * Add an include. Name like 'header.html'.
+   */
+  addInclude(name, content) {
+    this._includes[name] = content;
+    return this;
+  }
+
+  /**
+   * Add a data file. Data as object or YAML string.
+   */
+  addData(name, data) {
+    this._data[name] = typeof data === 'string' ? yaml.load(data) : data;
+    return this;
+  }
+
+  /**
+   * Add a collection. Pages: [{ path, content }, ...].
+   */
+  addCollection(name, pages) {
+    this._collections[name] ||= [];
+    for (const p of pages) {
+      const { attributes, body } = this._parseFrontMatter(p.path, p.content);
+      this._collections[name].push({
+        path: p.path,
+        content: p.content,
+        ...attributes,
+        _body: body,
+      });
+    }
+    return this;
+  }
+
+  /**
+   * Add a root page.
+   */
+  addPage(path, content) {
+    this._rootPages.push({ path, content });
+    return this;
+  }
+
+  // ============================================================
+  // Lifecycle Events (output transformation, observability)
+  // Complements the Jekyll-style hooks: these fire around the
+  // build/render pipeline itself.
+  // ============================================================
+
+  /**
+   * Subscribe to a lifecycle event.
+   * Events: 'pre:build', 'post:build', 'pre:render', 'post:render'.
+   */
+  on(event, cb) {
+    (this._eventListeners ||= {})[event] ||= [];
+    this._eventListeners[event].push(cb);
+    return this;
+  }
+
+  async _emit(event, ...args) {
+    for (const fn of (this._eventListeners || {})[event] || []) {
+      await fn(...args);
+    }
+  }
+
+  /**
+   * One-shot render from a VFS object.
+   * @param {Object} vfs - Jekyll-style virtual file system
+   * @param {Object} [options] - engine options
+   * @returns {Promise<Array>} rendered pages
+   */
+  static async render(vfs, options = {}) {
+    return new JekyllEngine({ ...options, vfs }).build();
   }
 
   /**
@@ -1271,6 +1372,7 @@ export class JekyllEngine {
   }
 
   async _renderPage(path, content, isPost = false, postMeta = null, paginator = null, overridePermalink = null) {
+    await this._emit('pre:render', { path, content });
     const { attributes, body } = this._parseFrontMatter(path, content, this._docTypeForPath(path));
     // FIX (site.related_posts): pass the current post through so
     // _buildSiteContext can compute related_posts contextually, exactly
@@ -1341,13 +1443,15 @@ export class JekyllEngine {
       rendered = await this._applyLayouts(rendered, attributes.layout || postMeta.layout, pageCtx);
     }
 
-    return {
+    const result = {
       path,
       permalink: localPermalink,
       data: attributes,
       content: rendered,
       ...(paginator ? { paginator } : {}),
     };
+    await this._emit('post:render', result);
+    return result;
   }
 
   // FIX (pagination was entirely unimplemented). See the `buildPaginators`
@@ -1377,6 +1481,7 @@ export class JekyllEngine {
   }
 
   async build() {
+    await this._emit('pre:build', this);
     this.options.logger('Compiling resource dependency nodes...', 'info');
     const results = [];
 
@@ -1527,6 +1632,7 @@ export class JekyllEngine {
       }
     }
 
+    await this._emit('post:build', results);
     return results;
   }
 }
