@@ -23,9 +23,9 @@ import * as sass from 'sass';
 import hljs from 'highlight.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MINIMA = path.join(__dirname, '../..', 'battletest', 'minima-theme');
-const SITE = path.join(__dirname, '../..', 'battletest', 'testsite-source');
-const GROUND_TRUTH = path.join(__dirname, '../..', 'battletest', 'ground-truth-site');
+const MINIMA = path.join(__dirname, '..', 'battletest', 'minima-theme');
+const SITE = path.join(__dirname, '..', 'battletest', 'testsite-source');
+const GROUND_TRUTH = path.join(__dirname, '..', 'battletest', 'ground-truth-site');
 
 const BATTLE_IGNORE = ['_site', '.git', '.sass-cache', '.jekyll-cache', 'Gemfile', 'Gemfile.lock'];
 
