@@ -35,6 +35,16 @@ Initial documented API.
 
 ### Unreleased
 
+- **Added** native jekyll-feed generator (`jekyllFeed.js`): opt-in via
+  `plugins: [jekyll-feed]` in `_config.yml` (Jekyll-faithful). Generates
+  `/feed.xml` plus `/feed/<category>.xml` per `feed.categories`, using the
+  real jekyll-feed 0.17.0 `feed.xml` template verbatim. Drafts/future posts
+  excluded. `{% feed_meta %}` now emits an absolute URL (matching the gem).
+- **Changed** `{% seo %}` tag: expanded to faithfully mirror jekyll-seo-tag
+  2.8.0 (title, meta/og tags, canonical, Twitter cards, og:image, JSON-LD,
+  author, webmaster verification). No migration needed (output is a superset).
+- **Added** core Jekyll filters: `xml_escape`, `smartify`,
+  `normalize_whitespace` (needed by the feed template).
 - **Added** `fs-vfs.js` (universal, no `node:` imports): `readDirToVFS(dir, { fs, ignore })`
   reads a directory into a VFS object. `fs` is injected — `node:fs` in Node,
   memfs in the browser (proven by a real memfs test). Ignore matches any

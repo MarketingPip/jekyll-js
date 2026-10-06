@@ -24,7 +24,11 @@ Suite layout (run everything with `npm test` from the repo root):
   `frontmatter-defaults.test.js` (front-matter `defaults:` — scope
   path/type matching, precedence, deep merge, invalid-set warnings), and
   `where-exp.test.js` (the `where_exp` filter — LiquidJS's native
-  implementation locked in against regressions).
+  implementation locked in against regressions),
+  `seo-tag.test.js` (the `{% seo %}` tag — faithful to jekyll-seo-tag 2.8.0:
+  title, meta/og tags, canonical, Twitter cards, JSON-LD), and
+  `jekyll-feed.test.js` (native Atom feed generator using the real
+  jekyll-feed 0.17.0 template: `/feed.xml`, category feeds, `{% feed_meta %}`).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,
