@@ -138,7 +138,7 @@ describe('FIX 5: missing link targets raise', () => {
       },
     });
     const res = await engine.build();
-    expect(res[0].content).toContain('/about/');
+    expect(res[0].content).toContain('/about.html');
   });
 });
 

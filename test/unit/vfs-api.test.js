@@ -34,9 +34,9 @@ describe('programmatic VFS API', () => {
   test('removeFile drops the file from the next build', async () => {
     const engine = makeSite();
     engine.writeFile('about.md', '---\ntitle: About\n---\nAbout\n');
-    expect((await engine.build()).some((p) => p.permalink === '/about/')).toBe(true);
+    expect((await engine.build()).some((p) => p.permalink === '/about.html')).toBe(true);
     engine.removeFile('about.md');
-    expect((await engine.build()).some((p) => p.permalink === '/about/')).toBe(false);
+    expect((await engine.build()).some((p) => p.permalink === '/about.html')).toBe(false);
   });
 
   test('listFiles reflects writes and removals', () => {

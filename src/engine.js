@@ -1254,9 +1254,22 @@ export class JekyllEngine {
   _buildRootPagesSummary() {
     return this._rootPages.map((p) => {
       const { attributes, body } = this._parseFrontMatter(p.path, p.content, 'pages');
-      const url =
-        attributes.permalink ||
-        (p.path === 'index.md' || p.path === 'index.markdown' || p.path === 'index.html' ? '/' : `/${p.path.replace(/\.[^/.]+$/, '')}/`);
+      // FIX (oracle-found): match Jekyll's default /about.html URLs, not /about/.
+      const permalinkStyle = this._config?.permalink || this._config?.permalink_style || '';
+      const isPretty = permalinkStyle === 'pretty' || permalinkStyle === ':pretty';
+      let url;
+      if (attributes.permalink) {
+        url = attributes.permalink;
+      } else if (p.path === 'index.md' || p.path === 'index.markdown' || p.path === 'index.html') {
+        url = '/';
+      } else if (isPretty) {
+        url = `/${p.path.replace(/\.[^/.]+$/, '')}/`;
+      } else {
+        const base = p.path.replace(/\.[^/.]+$/, '');
+        const ext = p.path.match(/\.[^/.]+$/)?.[0] || '.html';
+        const outExt = ['.md', '.markdown'].includes(ext) ? '.html' : ext;
+        url = `/${base}${outExt}`;
+      }
       return {
         ...attributes,
         path: p.path,
@@ -1278,9 +1291,13 @@ export class JekyllEngine {
     // override the handful of computed fields.
     const posts = (this._collections.posts || []).map((p) => {
       const { _body, _permalink, _date, _slug, _excerptSeparator, _excerpt, content: _rawContent, ...rest } = p;
+      // FIX (oracle-found): real Jekyll provides post.id (URL without extension,
+      // e.g. /2026/01/02/second). The feed template uses {{ post.id }}.
+      const id = _permalink ? _permalink.replace(/\.html$/, '').replace(/\/$/, '') : '';
       return {
         ...rest,
         url: _permalink,
+        id,
         date: _date,
         // Also fixes a dead `p._excerpt` reference (that field was never
         // actually set anywhere) -- a real front-matter `excerpt:`
@@ -1349,7 +1366,9 @@ export class JekyllEngine {
               // Document#date always resolves (front matter -> filename ->
               // site.time); _date already carries that at scan time.
               date: rest.date || _date,
-              content: _body,
+              // FIX (oracle-found): real Jekyll's doc.content is rendered HTML,
+              // not raw markdown. Render it for template parity.
+              content: parseMarkdown(_body || ''),
               collection: name,
             };
           }),
@@ -1433,11 +1452,26 @@ export class JekyllEngine {
       } else if (path === 'index.md' || path === 'index.markdown' || path === 'index.html') {
         localPermalink = '/';
       } else {
-        // Strip extension; a trailing /index (nested index.html) becomes
-        // the directory URL, mirroring Jekyll's pretty permalinks.
+        // FIX (oracle-found): real Jekyll defaults to /about.html style URLs
+        // for pages, not /about/ (pretty). Only use pretty when
+        // permalink: pretty (or :pretty) is configured.
+        const permalinkStyle = this._config?.permalink || this._config?.permalink_style || '';
+        const isPretty = permalinkStyle === 'pretty' || permalinkStyle === ':pretty';
         let p = path.replace(/\.[^/.]+$/, '');
-        if (p.endsWith('/index')) p = p.slice(0, -'/index'.length);
-        localPermalink = `/${p}/`;
+        const isDirIndex = p.endsWith('/index');
+        if (isDirIndex) p = p.slice(0, -'/index'.length);
+        if (isDirIndex) {
+          // Directory index (docs/index.html) → /docs/ always
+          localPermalink = `/${p}/`;
+        } else if (isPretty) {
+          localPermalink = `/${p}/`;
+        } else {
+          // Default: /:path:output_ext → /about.html
+          const ext = path.match(/\.[^/.]+$/)?.[0] || '.html';
+          // Markdown pages output as HTML
+          const outExt = ['.md', '.markdown'].includes(ext) ? '.html' : ext;
+          localPermalink = `/${p}${outExt}`;
+        }
       }
     }
 
