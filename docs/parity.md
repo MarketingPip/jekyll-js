@@ -50,7 +50,10 @@ per Renderer#run), `{% highlight %}`,
 `{% link %}`/`{% post_url %}`, `{% include_cached %}` (jekyll-include-cache),
 SEO/feed/sitemap/redirect plugins,
 timezone-correct dates, `permalink_style` (pretty/date/none/ordinal),
-`exclude`/`include` config, nested pages, front-matter-less files as static.
+`exclude`/`include` config, nested pages, front-matter-less files as static,
+parenthesized `{% if %}`/`{% elsif %}`/`{% unless %}` conditions (e.g.
+beautiful-jekyll's `(site.title != pagetitle)` — grouping parens stripped
+before LiquidJS parses; Ruby Liquid parity).
 
 ## Known gaps
 

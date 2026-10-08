@@ -51,6 +51,10 @@ Suite layout (run everything with `npm test` from the repo root):
   and `sitemap-robots.test.js` (jekyll-sitemap emission order: config-order
   collections before posts, date-ascending docs, basename-sorted pages;
   `robots.txt` with front matter renders as a page, like the real gem).
+  not a page — matches Jekyll's reader.rb), `nested-layouts.test.js`
+  and `paren-conditions.test.js` (parenthesized `{% if %}`/`{% elsif %}`/`{% unless %}`
+  conditions — e.g. beautiful-jekyll's `(site.title != pagetitle)` — preprocessed
+  to grouping-free form before LiquidJS parses).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,

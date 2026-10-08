@@ -160,7 +160,7 @@ export async function generateSitemap(engine) {
   // sitemap), sorted by basename like `site.pages.sort_by!(&:name)`.
   const htmlPages = [...(siteCtx.html_pages || [])].sort(comparePagesByName);
 
-  const html = await engine.liquidEngine.parseAndRender(
+  const html = await engine.renderTemplate(
     // FIX (oracle-found): real jekyll-sitemap minifies the template with
     // MINIFY_REGEX = /(?<=>\n|})\s+/ — strips whitespace after >\n or }.
     // Note: different from jekyll-feed's /(?<=>|})\s+/ (no \n requirement).
