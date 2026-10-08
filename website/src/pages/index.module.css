@@ -1,23 +1,301 @@
 /**
- * CSS files with the .module.css suffix will be treated as CSS modules
- * and scoped locally.
+ * Homepage styles — matches the original Tailwind landing aesthetic.
+ * Dark theme (#070a13), Inter + JetBrains Mono, cyan accent.
  */
 
 .heroBanner {
-  padding: 4rem 0;
+  padding: 5rem 0 4rem;
   text-align: center;
   position: relative;
   overflow: hidden;
+  background: #070a13;
 }
 
 @media screen and (max-width: 996px) {
   .heroBanner {
-    padding: 2rem;
+    padding: 3rem 1rem;
   }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #94a3b8;
+  border: 1px solid #1e293b;
+  border-radius: 9999px;
+  padding: 0.4rem 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.badgeDot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: #34d399;
+}
+
+.heroTitle {
+  font-size: 3.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: #fff;
+  margin-bottom: 1.5rem;
+}
+
+@media screen and (min-width: 640px) {
+  .heroTitle {
+    font-size: 4.5rem;
+  }
+}
+
+.heroSubtitle {
+  font-size: 1.15rem;
+  color: #94a3b8;
+  max-width: 42rem;
+  margin: 0 auto 2.5rem;
+  line-height: 1.7;
 }
 
 .buttons {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media screen and (min-width: 640px) {
+  .buttons {
+    flex-direction: row;
+  }
+}
+
+.npmLine {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.npmLine span {
+  color: #475569;
+}
+
+/* Sections */
+.section {
+  padding: 4rem 0;
+}
+
+.sectionAlt {
+  border-top: 1px solid rgba(30, 41, 59, 0.8);
+  border-bottom: 1px solid rgba(30, 41, 59, 0.8);
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.sectionTitle {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-align: center;
+  color: #fff;
+  margin-bottom: 1rem;
+}
+
+@media screen and (min-width: 640px) {
+  .sectionTitle {
+    font-size: 2.5rem;
+  }
+}
+
+.sectionDesc {
+  text-align: center;
+  color: #94a3b8;
+  max-width: 36rem;
+  margin: 0 auto 3rem;
+  line-height: 1.7;
+}
+
+/* Feature cards */
+.featureGrid {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+@media screen and (min-width: 640px) {
+  .featureGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.featureCard {
+  border-radius: 1rem;
+  border: 1px solid #1e293b;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.6);
+  transition: border-color 0.2s;
+}
+
+.featureCard:hover {
+  border-color: rgba(34, 211, 238, 0.4);
+}
+
+.featureEmoji {
+  font-size: 1.875rem;
+  margin-bottom: 1rem;
+}
+
+.featureCard h3 {
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: #fff;
+  margin-bottom: 0.5rem;
+}
+
+.featureCard p {
+  font-size: 0.875rem;
+  color: #94a3b8;
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* Stats */
+.statGrid {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 48rem;
+  margin: 2.5rem auto 0;
+}
+
+@media screen and (min-width: 640px) {
+  .statGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.statCard {
+  border-radius: 1rem;
+  border: 1px solid #1e293b;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.6);
+  text-align: center;
+}
+
+.statNumber {
+  font-size: 2.25rem;
+  font-weight: 800;
+  color: #34d399;
+}
+
+.statNumberSmall {
+  font-size: 1.25rem;
+  color: #64748b;
+}
+
+.statLabel {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.statSub {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+/* Quick start code blocks */
+.codeGrid {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 56rem;
+  margin: 2.5rem auto 0;
+}
+
+@media screen and (min-width: 1024px) {
+  .codeGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.codeCard {
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 1px solid #1e293b;
+}
+
+.codeCardHeader {
+  padding: 0.75rem 1.25rem;
+  background: rgba(30, 41, 59, 0.6);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.codeCard pre {
+  margin: 0;
+  padding: 1.25rem;
+  background: #070a13;
+  font-size: 0.85rem;
+  overflow-x: auto;
+}
+
+/* Links grid */
+.linkGrid {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 64rem;
+  margin: 2.5rem auto 0;
+}
+
+@media screen and (min-width: 640px) {
+  .linkGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media screen and (min-width: 1024px) {
+  .linkGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.linkCard {
+  border-radius: 1rem;
+  border: 1px solid #1e293b;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.6);
+  transition: border-color 0.2s;
+  display: block;
+  text-decoration: none;
+}
+
+.linkCard:hover {
+  border-color: rgba(34, 211, 238, 0.5);
+  text-decoration: none;
+}
+
+.linkCard h3 {
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.5rem;
+}
+
+.linkCard:hover h3 {
+  color: #67e8f9;
+}
+
+.linkCard p {
+  font-size: 0.875rem;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.6;
 }

@@ -1,31 +1,142 @@
 /**
- * Any CSS included here will be global. The classic template
- * bundles Infima by default. Infima is a CSS framework designed to
- * work well for content-centric websites.
+ * jekyll-js docs theme — dark, modern, matching the original Tailwind landing.
+ * Background #070a13, Inter + JetBrains Mono, cyan accent (#22d3ee).
  */
 
-/* Brand: Jekyll red (#cc0000 family) — consistent in light mode,
- * lighter palette in dark mode per Infima readability guidance. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 :root {
-  --ifm-color-primary: #cc0000;
-  --ifm-color-primary-dark: #b80000;
-  --ifm-color-primary-darker: #ad0000;
-  --ifm-color-primary-darkest: #8f0000;
-  --ifm-color-primary-light: #e00000;
-  --ifm-color-primary-lighter: #eb0000;
-  --ifm-color-primary-lightest: #f54242;
+  /* Brand: cyan accent (was Jekyll red — switched to match the landing) */
+  --ifm-color-primary: #0891b2;
+  --ifm-color-primary-dark: #0e7490;
+  --ifm-color-primary-darker: #155e75;
+  --ifm-color-primary-darkest: #164e63;
+  --ifm-color-primary-light: #06b6d4;
+  --ifm-color-primary-lighter: #22d3ee;
+  --ifm-color-primary-lightest: #67e8f9;
+
+  --ifm-font-family-base: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, monospace;
   --ifm-code-font-size: 95%;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+
+  /* Light mode stays readable, but dark is the default (see colorMode) */
+  --ifm-background-color: #ffffff;
+  --ifm-background-surface-color: #f8fafc;
 }
 
-/* For readability concerns, you should choose a lighter palette in dark mode. */
+/* Dark mode — the primary experience, matching the old landing */
 [data-theme='dark'] {
-  --ifm-color-primary: #ff5c5c;
-  --ifm-color-primary-dark: #ff4d4d;
-  --ifm-color-primary-darker: #ff4343;
-  --ifm-color-primary-darkest: #ff2626;
-  --ifm-color-primary-light: #ff6b6b;
-  --ifm-color-primary-lighter: #ff7474;
-  --ifm-color-primary-lightest: #ff8f8f;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ifm-color-primary: #22d3ee;
+  --ifm-color-primary-dark: #06b6d4;
+  --ifm-color-primary-darker: #0891b2;
+  --ifm-color-primary-darkest: #0e7490;
+  --ifm-color-primary-light: #67e8f9;
+  --ifm-color-primary-lighter: #a5f3fc;
+  --ifm-color-primary-lightest: #cffafe;
+
+  --ifm-background-color: #070a13;
+  --ifm-background-surface-color: #0f172a;
+  --ifm-navbar-background-color: rgba(15, 23, 42, 0.95);
+  --ifm-footer-background-color: #070a13;
+
+  --ifm-font-color-base: #cbd5e1;
+  --ifm-font-color-base-inverse: #0f172a;
+  --ifm-heading-color: #ffffff;
+
+  --ifm-card-background-color: rgba(30, 41, 59, 0.6);
+  --ifm-toc-border-color: #1e293b;
+  --ifm-table-border-color: #1e293b;
+  --ifm-hr-border-color: #1e293b;
+
+  --docusaurus-highlighted-code-line-bg: rgba(34, 211, 238, 0.08);
+}
+
+/* Gradient headline text (hero) */
+.gradient-text {
+  background: linear-gradient(135deg, #22d3ee 0%, #3b82f6 50%, #a855f7 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.glow-text {
+  text-shadow: 0 0 24px rgba(6, 182, 212, 0.35);
+}
+
+/* Dark code blocks everywhere */
+[data-theme='dark'] .prism-code {
+  background-color: #070a13 !important;
+}
+
+/* Navbar polish */
+.navbar {
+  border-bottom: 1px solid rgba(30, 41, 59, 0.8);
+  backdrop-filter: blur(12px);
+}
+
+.navbar__title {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* Version badge in navbar */
+.navbar__item .version-badge {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 11px;
+  font-weight: 500;
+  color: #67e8f9;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  border-radius: 9999px;
+  padding: 2px 8px;
+  margin-left: 8px;
+}
+
+/* Cards get the landing's bordered look */
+[data-theme='dark'] .card {
+  border: 1px solid #1e293b;
+  background: rgba(30, 41, 59, 0.6);
+  border-radius: 1rem;
+}
+
+/* Footer matches landing */
+.footer {
+  border-top: 1px solid rgba(30, 41, 59, 0.8);
+}
+
+.footer__title {
+  color: #ffffff;
+}
+
+/* Admonitions pop on dark */
+[data-theme='dark'] .admonition {
+  border-left-width: 3px;
+}
+
+/* Search box dark */
+[data-theme='dark'] .navbar__search-input {
+  background-color: rgba(30, 41, 59, 0.8);
+  border: 1px solid #1e293b;
+  color: #e2e8f0;
+}
+
+/* Sidebar polish */
+[data-theme='dark'] .menu__link--active {
+  background: rgba(34, 211, 238, 0.1);
+  color: #67e8f9;
+}
+
+[data-theme='dark'] .table-of-contents__link--active {
+  color: #67e8f9;
+}
+
+/* Pagination nav */
+[data-theme='dark'] .pagination-nav__link {
+  border-color: #1e293b;
+  background: rgba(30, 41, 59, 0.4);
+}
+
+[data-theme='dark'] .pagination-nav__link:hover {
+  border-color: rgba(34, 211, 238, 0.5);
 }
