@@ -18,7 +18,7 @@ Usage in _config.yml:
     - jekyll-redirect-from
 
 Or programmatically:
-  import { redirectFromPlugin } from './jekyllRedirectFrom.js';
+  import &#123; redirectFromPlugin &#125; from './jekyllRedirectFrom.js';
   engine.use(redirectFromPlugin);
 
 **Kind**: global constant

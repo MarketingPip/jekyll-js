@@ -4,17 +4,9 @@ title: Assets Pipeline API
 
 ## Functions
 
-<dl>
-<dt><a href="#isSassAsset">isSassAsset()</a></dt>
-<dd><p>Determine if a VFS file should be processed by the Sass pipeline.
-Jekyll&#39;s rule: files in <code>assets/</code> with <code>.scss</code> or <code>.sass</code> extension that
-contain front-matter (start with <code>---</code>). Partial files (starting with <code>_</code>)
-are compiled only when imported, not directly.</p>
-</dd>
-<dt><a href="#compileSassAsset">compileSassAsset(path, content, vfs, config, sass)</a> ⇒ <code>Object</code></dt>
-<dd><p>Compile a single SCSS/Sass asset file using the VFS as the import resolver.</p>
-</dd>
-</dl>
+
+- [isSassAsset()](#isSassAsset)
+
 
 <a name="isSassAsset"></a>
 

@@ -47,6 +47,57 @@ const TITLES = {
   'fs-vfs': 'FS / VFS API',
 };
 
+/**
+ * Escape literal `{`/`}` as HTML entities so MDX does not parse them as JSX
+ * expressions (JSDoc type text like `Promise.<{path, permalink, content}>`
+ * in headings would otherwise crash the page at render time with a
+ * ReferenceError). Entities render as literal braces in text, but must stay
+ * raw inside fenced code blocks and inline code spans, where they would
+ * show literally — so those are left untouched.
+ */
+const escapeBracesText = (text) => {
+  let inFence = false;
+  return text
+    .split('\n')
+    .map((line) => {
+      if (/^```/.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      // Only escape outside `inline code` spans.
+      return line
+        .split(/(`[^`]*`)/g)
+        .map((seg, i) =>
+          i % 2 === 1
+            ? seg
+            : seg.replace(/{/g, '&#123;').replace(/}/g, '&#125;')
+        )
+        .join('');
+    })
+    .join('\n');
+};
+
+/**
+ * Make jsdoc2md output safe for Docusaurus MDX:
+ *  1. jsdoc2md emits a <dl>/<dt>/<dd> member index with unclosed <p> tags,
+ *     which MDX rejects ("Expected a closing tag ... before the end of
+ *     paragraph"). Rewrite the index as a plain markdown list.
+ *  2. Strip any leftover stray block tags.
+ *  3. Escape braces outside code (see escapeBracesText).
+ */
+function mdxSafe(md) {
+  md = md.replace(/<dl>([\s\S]*?)<\/dl>/g, (_m, inner) => {
+    const items = [];
+    const dtRe = /<dt><a href="([^"]+)">([\s\S]*?)<\/a><\/dt>/g;
+    let mm;
+    while ((mm = dtRe.exec(inner))) items.push(`- [${mm[2].trim()}](${mm[1]})`);
+    return items.length ? `\n${items.join('\n')}\n` : '\n';
+  });
+  md = md.replace(/<\/?(?:p|dd|dt|dl)>/g, '');
+  return escapeBracesText(md);
+}
+
 const apiDir = join(websiteDir, 'docs', 'api');
 mkdirSync(apiDir, { recursive: true });
 
@@ -83,7 +134,7 @@ for (const [rel, slug] of SOURCES) {
   }
   const dest = join(apiDir, `${slug}-reference.md`);
   const frontmatter = `---\ntitle: ${TITLES[slug] ?? slug}\n---\n\n`;
-  writeFileSync(dest, frontmatter + md.trim() + '\n');
+  writeFileSync(dest, frontmatter + mdxSafe(md.trim()) + '\n');
   console.log(`wrote docs/api/${slug}-reference.md ← ${rel}`);
   pages.push({ slug, title: TITLES[slug] ?? slug, rel });
 }
