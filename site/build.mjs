@@ -11,8 +11,8 @@
  *   3. Guides           site/guides/*.md -> site/dist/v0.2/guides/<name>/index.html
  *   4. Guides index     site/guides/index.md -> site/dist/v0.2/guides/index.html
  *   5. Landing          site/landing.html -> site/dist/v0.2/index.html (placeholder if missing)
- *   6. Playground       playground/ -> site/dist/v0.2/playground/
- *   7. Engine bundles   dist/*.js -> site/dist/v0.2/playground/dist/ (warns if dist/ missing)
+ *   6. Playground       playground/ -> site/dist/playground/ (UNVERSIONED)
+ *   7. Engine bundles   dist/*.js -> site/dist/playground/dist/ (warns if dist/ missing)
  *   8. Root redirect    site/dist/index.html -> v0.2/
  *   9. versions.json
  *  10. sitemap.xml     (base URL: $SITE_URL or https://marketingpip.github.io/jekyll-js/)
@@ -334,15 +334,16 @@ if (!guideFiles.length) warn('no guide markdown files found — skipping guides'
 // ---------------------------------------------------------------------------
 
 {
+  // Playground is UNVERSIONED (live demo, always latest) -> site/dist/playground/
   const src = path.join(ROOT, 'playground');
-  const dst = path.join(VDIR, 'playground');
+  const dst = path.join(DIST, 'playground');
   if (existsSync(src)) {
     cpSync(src, dst, {
       recursive: true,
       filter: (p) => !/(^|\/)node_modules(\/|$)/.test(p) && !/(^|\/)\.git(\/|$)/.test(p),
     });
-    pages.push(`${VERSION}/playground/`);
-    log('playground: copied');
+    pages.push(`playground/`);
+    log('playground: copied (unversioned)');
   } else {
     warn('playground/ not found — skipping');
   }
@@ -354,13 +355,13 @@ if (!guideFiles.length) warn('no guide markdown files found — skipping guides'
 
 {
   const src = path.join(ROOT, 'dist');
-  const dst = path.join(VDIR, 'playground', 'dist');
+  const dst = path.join(DIST, 'playground', 'dist');
   if (existsSync(src)) {
     const bundles = readdirSync(src).filter((f) => f.endsWith('.js'));
     if (bundles.length) {
       mkdirSync(dst, { recursive: true });
       for (const f of bundles) cpSync(path.join(src, f), path.join(dst, f));
-      log(`engine bundles: copied ${bundles.length} file(s) to ${VERSION}/playground/dist/`);
+      log(`engine bundles: copied ${bundles.length} file(s) to playground/dist/`);
     } else {
       warn('dist/ exists but contains no .js bundles');
     }
