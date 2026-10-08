@@ -1,4 +1,4 @@
-import { JekyllEngine } from '../../engine.js';
+import { JekyllEngine } from '../../src/engine.js';
 
 // where_exp is a core Jekyll filter (used by jekyll-feed's template among
 // others). Verified 2026-10-05: LiquidJS ships a correct native

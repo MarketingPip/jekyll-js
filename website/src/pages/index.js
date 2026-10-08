@@ -27,6 +27,11 @@ function HomepageHeader() {
             href="https://marketingpip.github.io/jekyll-js/playground/">
             Try the Playground
           </Link>
+          <Link
+            className="button button--secondary button--lg"
+            href="https://github.com/MarketingPip/jekyll-js">
+            GitHub
+          </Link>
         </div>
       </div>
     </header>

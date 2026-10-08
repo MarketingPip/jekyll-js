@@ -1,8 +1,8 @@
-# Deploys the versioned documentation site to GitHub Pages.
-# Build contract: `node site/build.mjs` produces the complete, self-contained
-# site under `site/dist/` (landing page, guides, JSDoc API, playground).
-# This workflow does not know or care how site/build.mjs builds it —
-# it just uploads the directory.
+# Deploys the Docusaurus documentation site to GitHub Pages.
+# Build contract:
+#   - repo root: `npm run build` regenerates the engine bundles in dist/
+#     (the playground loads dist/ directly; CI rebuilds to prove it works)
+#   - website/: Docusaurus build, outputs website/build/
 name: GitHub Pages
 on:
   push:
@@ -20,14 +20,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Repo root deps + engine bundles (dist/) — inputs to the docs site.
       - run: npm ci
-      # Engine bundles (dist/) — inputs to the docs site build.
       - run: npm run build
-      # Docs site build: produces the full versioned site in site/dist/.
-      - run: node site/build.mjs
+      # 270-test gate — docs deploy must not ship a broken engine.
+      - run: npm test
+      # Docusaurus site: prebuild stages the playground, build emits
+      # website/build/ (landing, versioned docs, search index, sitemap).
+      - working-directory: website
+        run: npm ci
+      - working-directory: website
+        run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site/dist/
+          path: website/build/
   deploy:
     needs: build
     runs-on: ubuntu-latest
