@@ -160,7 +160,7 @@ const config = {
             items: [
               {
                 label: 'Changelog',
-                to: '/docs/project/changelog',
+                to: '/docs/changelog',
               },
               {
                 label: 'Migration Guide',
