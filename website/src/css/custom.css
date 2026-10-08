@@ -140,3 +140,32 @@
 [data-theme='dark'] .pagination-nav__link:hover {
   border-color: rgba(34, 211, 238, 0.5);
 }
+
+/* Footer polish */
+[data-theme='dark'] .footer {
+  background-color: #04060c;
+  border-top: 1px solid #1e293b;
+}
+
+[data-theme='dark'] .footer__title {
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+[data-theme='dark'] .footer__link-item {
+  color: #94a3b8;
+  transition: color 0.2s;
+}
+
+[data-theme='dark'] .footer__link-item:hover {
+  color: #22d3ee;
+  text-decoration: none;
+}
+
+[data-theme='dark'] .footer__copyright {
+  color: #64748b;
+  font-size: 0.875rem;
+}

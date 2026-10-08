@@ -114,11 +114,23 @@ const config = {
         style: 'dark',
         links: [
           {
-            title: 'Docs',
+            title: 'Documentation',
             items: [
               {
                 label: 'Getting Started',
                 to: '/docs/intro',
+              },
+              {
+                label: 'Guides',
+                to: '/docs/getting-started',
+              },
+              {
+                label: 'API Reference',
+                to: '/docs/api/engine',
+              },
+              {
+                label: 'Parity Status',
+                to: '/docs/project/parity',
               },
             ],
           },
@@ -132,6 +144,27 @@ const config = {
               {
                 label: 'GitHub',
                 href: 'https://github.com/MarketingPip/jekyll-js',
+              },
+              {
+                label: 'Issues',
+                href: 'https://github.com/MarketingPip/jekyll-js/issues',
+              },
+              {
+                label: 'Releases',
+                href: 'https://github.com/MarketingPip/jekyll-js/releases',
+              },
+            ],
+          },
+          {
+            title: 'More',
+            items: [
+              {
+                label: 'Changelog',
+                to: '/docs/project/changelog',
+              },
+              {
+                label: 'Migration Guide',
+                to: '/docs/migration',
               },
             ],
           },
