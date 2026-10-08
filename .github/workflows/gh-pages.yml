@@ -1,3 +1,8 @@
+# Deploys the versioned documentation site to GitHub Pages.
+# Build contract: `node site/build.mjs` produces the complete, self-contained
+# site under `site/dist/` (landing page, guides, JSDoc API, playground).
+# This workflow does not know or care how site/build.mjs builds it —
+# it just uploads the directory.
 name: GitHub Pages
 on:
   push:
@@ -16,18 +21,13 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # Engine bundles (dist/) — inputs to the docs site build.
       - run: npm run build
-      # Playground: bundle dist files alongside the playground
-      - run: |
-          mkdir -p playground/dist
-          cp dist/jekyll-engine.js playground/dist/
-          cp dist/sass-plugin.js playground/dist/
-          cp dist/highlight-plugin.js playground/dist/
-      # API docs via JSDoc
-      - run: npx jsdoc src/engine.js -d playground/api
+      # Docs site build: produces the full versioned site in site/dist/.
+      - run: node site/build.mjs
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: playground/
+          path: site/dist/
   deploy:
     needs: build
     runs-on: ubuntu-latest

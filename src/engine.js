@@ -1646,6 +1646,12 @@ export class JekyllEngine {
     return { templatePath: templateSummary.path, pagers };
   }
 
+  /**
+   * Build the site: read pages/posts/collections from the VFS, render
+   * Markdown/Liquid through layouts, run generators and hooks, and
+   * return every rendered page.
+   * @returns {Promise<Array<{path: string, content: string}>>} rendered pages
+   */
   async build() {
     await this._emit('pre:build', this);
 

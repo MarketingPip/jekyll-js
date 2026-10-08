@@ -10,7 +10,9 @@
 - ✅ **TypeScript** — full type definitions included
 - ✅ **CLI** — `jekyll-js build` and `jekyll-js serve`
 
-**[Live playground →](https://marketingpip.github.io/jekyll-js/)** · **[API docs →](https://marketingpip.github.io/jekyll-js/api/)**
+**[Docs →](https://marketingpip.github.io/jekyll-js/)** · **[Live playground →](https://marketingpip.github.io/jekyll-js/v0.2/playground/)** · **[API docs →](https://marketingpip.github.io/jekyll-js/v0.2/api/)** · **[Guides →](https://marketingpip.github.io/jekyll-js/v0.2/guides/)**
+
+> Versioned docs: each release snapshots to `vX.Y/` — browse all versions from the [docs root](https://marketingpip.github.io/jekyll-js/). Build locally with `npm run docs:build`.
 
 ---
 
