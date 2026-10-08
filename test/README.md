@@ -34,8 +34,11 @@ Suite layout (run everything with `npm test` from the repo root):
   `include-cached.test.js` (`{% include_cached %}` from jekyll-include-cache —
   renders identically to `{% include %}`),
   `no-frontmatter.test.js` (`.md` without front matter is a static file,
-  not a page — matches Jekyll's reader.rb), and `nested-layouts.test.js`
-  (layout chains — a layout with its own `layout:` front matter renders inside-out).
+  not a page — matches Jekyll's reader.rb), `nested-layouts.test.js`
+  (layout chains — a layout with its own `layout:` front matter renders inside-out),
+  and `paren-conditions.test.js` (parenthesized `{% if %}`/`{% elsif %}`/`{% unless %}`
+  conditions — e.g. beautiful-jekyll's `(site.title != pagetitle)` — preprocessed
+  to grouping-free form before LiquidJS parses).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,

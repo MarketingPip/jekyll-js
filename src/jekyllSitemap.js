@@ -95,7 +95,7 @@ export async function generateSitemap(engine) {
     });
   }
 
-  const html = await engine.liquidEngine.parseAndRender(
+  const html = await engine.renderTemplate(
     // FIX (oracle-found): real jekyll-sitemap minifies the template with
     // MINIFY_REGEX = /(?<=>\n|})\s+/ — strips whitespace after >\n or }.
     // Note: different from jekyll-feed's /(?<=>|})\s+/ (no \n requirement).

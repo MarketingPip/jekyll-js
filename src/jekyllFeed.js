@@ -165,7 +165,7 @@ export async function generateFeeds(engine) {
     // FIX (oracle-found): real jekyll-feed minifies the template with
     // MINIFY_REGEX = /(?<=>|})\s+/ — strips whitespace after > or }.
     const minifiedTemplate = FEED_TEMPLATE.replace(/(?<=>|})\s+/g, '');
-    const html = await engine.liquidEngine.parseAndRender(minifiedTemplate, {
+    const html = await engine.renderTemplate(minifiedTemplate, {
       site: siteCtx,
       page,
       jekyll: { version: '4.3.4' },

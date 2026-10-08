@@ -16,6 +16,7 @@ import { Marked, Renderer } from 'marked';
 import * as yaml from 'js-yaml';
 import fm from 'front-matter';
 import { registerJekyllExtensions } from './jekyllTags.js';
+import { preprocessConditionals } from './liquidPreprocess.js';
 import { isSassAsset, compileSassAsset } from './assetsPipeline.js';
 import { isFeedEnabled, generateFeeds } from './jekyllFeed.js';
 import { isSitemapEnabled, generateSitemap } from './jekyllSitemap.js';
@@ -529,14 +530,17 @@ export class JekyllEngine {
         readFile: async (file) => {
           const cleanFile = this._resolveVfsPath(file);
           if (this.vfsTemplates[cleanFile] !== undefined) {
-            return this.vfsTemplates[cleanFile];
+            // P0 (parenthesized {% if %}): LiquidJS parses partials fetched
+            // through the FS, so preprocess here — this is the choke point
+            // for every {% include %} in pages AND layouts.
+            return preprocessConditionals(this.vfsTemplates[cleanFile]);
           }
           throw new Error(`Template not resolved: ${file}`);
         },
         readFileSync: (file) => {
           const cleanFile = this._resolveVfsPath(file);
           if (this.vfsTemplates[cleanFile] !== undefined) {
-            return this.vfsTemplates[cleanFile];
+            return preprocessConditionals(this.vfsTemplates[cleanFile]);
           }
           throw new Error(`Template not resolved: ${file}`);
         },
@@ -557,6 +561,9 @@ export class JekyllEngine {
     // that LiquidJS either lacks or gets subtly wrong.
     registerJekyllExtensions(this.liquidEngine, {
       highlighter: options.highlighter,
+      // P0 (parenthesized {% if %}): include_cached parses include content
+      // itself, bypassing the FS choke point — hand it the preprocessor.
+      preprocess: preprocessConditionals,
       getInclude: (filename) => {
         const cleanFile = this._resolveVfsPath(`_includes/${filename}`);
         // Also try without _includes/ prefix
@@ -1509,6 +1516,18 @@ export class JekyllEngine {
     return undefined;
   }
 
+  /**
+   * Parse + render a template source with the LiquidJS engine, applying
+   * source preprocessing first (e.g. parenthesized {% if %} conditions that
+   * LiquidJS cannot tokenize but Ruby Liquid treats as grouping).
+   * This is the single choke point for direct template parsing — use it
+   * instead of calling this.liquidEngine.parseAndRender directly.
+   * ({% include %} partials are covered separately via the FS callbacks.)
+   */
+  async renderTemplate(source, scope) {
+    return this.liquidEngine.parseAndRender(preprocessConditionals(source), scope);
+  }
+
   async _applyLayouts(html, layoutName, ctx) {
     const visited = new Set();
     while (layoutName && !visited.has(layoutName)) {
@@ -1516,7 +1535,7 @@ export class JekyllEngine {
       const layoutContent = this._resolveLayout(layoutName);
       if (!layoutContent) break;
       const { attributes: fmLayout, body: layoutBody } = this._parseFrontMatter(`_layouts/${layoutName}`, layoutContent);
-      html = await this.liquidEngine.parseAndRender(layoutBody, { ...ctx, content: html });
+      html = await this.renderTemplate(layoutBody, { ...ctx, content: html });
       layoutName = fmLayout.layout;
     }
     return html;
@@ -1597,7 +1616,7 @@ export class JekyllEngine {
     // paginated index page.
     if (paginator) pageCtx.paginator = paginator;
 
-    let rendered = await this.liquidEngine.parseAndRender(body, pageCtx);
+    let rendered = await this.renderTemplate(body, pageCtx);
 
     // FIX (.markdown extension): also convert .markdown files to HTML,
     // not just .md files.

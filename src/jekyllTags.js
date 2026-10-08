@@ -630,7 +630,12 @@ function registerIncludeCachedTag(engine, opts = {}) {
       // We need to push the include variable onto the context
       ctx.push({ include: includeScope });
       try {
-        const result = await engine.parseAndRender(content, ctx.getAll());
+        // P0 (parenthesized {% if %}): preprocess include content the same way
+      // the engine's FS choke point does for plain {% include %} tags.
+      const result = await engine.parseAndRender(
+        opts.preprocess ? opts.preprocess(content) : content,
+        ctx.getAll()
+      );
         return result;
       } finally {
         ctx.pop();
