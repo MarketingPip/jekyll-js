@@ -990,8 +990,26 @@ export class JekyllEngine {
       if (path === '_config.yml' || path === '_config.yaml') {
         continue; // already parsed above
       }
-      if (path.startsWith('_layouts/')) {
-        this._layouts[path.replace('_layouts/', '')] = content;
+      // FIX (theme layouts never injected): gem-style themes keep their files
+      // under a subdirectory (e.g. `chirpy/_layouts/default.html`). Real
+      // Jekyll (lib/jekyll/theme.rb + lib/jekyll/readers/layout_reader.rb)
+      // merges the theme dir's layouts with the site's own `_layouts/`,
+      // the site winning on name conflicts. The old `startsWith('_layouts/')`
+      // check only matched the VFS root, so theme layouts were never
+      // registered -- `_resolveLayout` returned undefined, `_applyLayouts`
+      // broke out of its loop immediately, and every page rendered as a
+      // bare fragment with no layout wrapping at all.
+      const themeLayoutsIdx = path.indexOf('/_layouts/');
+      if (path.startsWith('_layouts/') || themeLayoutsIdx !== -1) {
+        const name =
+          themeLayoutsIdx === -1
+            ? path.slice('_layouts/'.length)
+            : path.slice(themeLayoutsIdx + '/_layouts/'.length);
+        // Site-root layouts win over theme-dir layouts (Jekyll parity),
+        // regardless of VFS merge order.
+        if (themeLayoutsIdx === -1 || this._layouts[name] === undefined) {
+          this._layouts[name] = content;
+        }
         continue;
       }
       if (path.startsWith('_includes/')) {

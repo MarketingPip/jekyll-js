@@ -45,6 +45,9 @@ Suite layout (run everything with `npm test` from the repo root):
   and `pipeline-fixes.test.js` (read/discovery pipeline: `_drafts/` excluded
   without `show_drafts`, `:categories` joined raw (not slugified) in permalinks,
   YAML merge keys resolve in `_data`, `_data` subdirectories nest).
+  and `layout-injection.test.js` (`layout:` with/without extension wraps content,
+  nested chains, and gem-style theme-dir `_layouts/` merging with site-wins
+  precedence per theme.rb).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,
