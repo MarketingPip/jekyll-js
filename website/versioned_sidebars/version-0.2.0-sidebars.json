@@ -1,0 +1,35 @@
+{
+  "tutorialSidebar": [
+    {
+      "type": "category",
+      "label": "Getting Started",
+      "items": [
+        "intro",
+        "getting-started",
+        "configuration",
+        "templates",
+        "plugins",
+        "migration"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "API Reference",
+      "items": [
+        "api/engine",
+        "api/browser",
+        "changelog"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Project",
+      "items": [
+        "project/parity",
+        "project/opal-boundaries",
+        "project/wasm-oracle-status",
+        "project/announcement"
+      ]
+    }
+  ]
+}
