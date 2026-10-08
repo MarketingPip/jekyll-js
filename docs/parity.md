@@ -45,7 +45,9 @@ front-matter `defaults:`, Sass pipeline, `{% highlight %}`,
 `{% link %}`/`{% post_url %}`, `{% include_cached %}` (jekyll-include-cache),
 SEO/feed/sitemap/redirect plugins,
 timezone-correct dates, `permalink_style` (pretty/date/none/ordinal),
-`exclude`/`include` config, nested pages, front-matter-less files as static.
+`exclude`/`include` config, nested pages, front-matter-less files as static,
+static files emitted verbatim by build() (`_sass/` excluded),
+.xml/.json files with front matter rendered as pages.
 
 ## Known gaps
 
