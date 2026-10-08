@@ -152,6 +152,11 @@ describe('robots.txt parity', () => {
     const pages = await engine.build();
     expect(engine._staticFiles.some((f) => f.path === '/robots.txt')).toBe(true);
     expect(engine._rootPages.some((p) => p.path === 'robots.txt')).toBe(false);
-    expect(pages.find((p) => p.permalink === '/robots.txt')).toBeUndefined();
+    // Static files ARE emitted in results (with raw content, no Liquid rendering).
+    // The key assertion is it's not a *page* (no front matter parsing, not in _rootPages).
+    const staticResult = pages.find((p) => p.permalink === '/robots.txt');
+    expect(staticResult).toBeDefined();
+    expect(staticResult.data).toEqual({});
+    expect(staticResult.content).toContain('User-agent: *');
   });
 });
