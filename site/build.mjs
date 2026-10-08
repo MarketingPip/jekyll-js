@@ -224,7 +224,7 @@ if (existsSync(jsdocCfg)) {
 // 3. Guides
 // ---------------------------------------------------------------------------
 
-const guidesDir = path.join(SITE, 'guides');
+const guidesDir = path.join(ROOT, 'docs', 'guides');
 let guideFiles = [];
 if (existsSync(guidesDir)) {
   guideFiles = readdirSync(guidesDir)
