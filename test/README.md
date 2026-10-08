@@ -55,6 +55,10 @@ Suite layout (run everything with `npm test` from the repo root):
   and `paren-conditions.test.js` (parenthesized `{% if %}`/`{% elsif %}`/`{% unless %}`
   conditions — e.g. beautiful-jekyll's `(site.title != pagetitle)` — preprocessed
   to grouping-free form before LiquidJS parses).
+  `static-files-emitted.test.js` (images/CSS/JS tracked in `site.static_files`
+  are emitted verbatim by `build()`), and `xml-json-pages.test.js`
+  (`.xml`/`.json` with front matter render as pages via `_renderPage`,
+  extension preserved — e.g. `/feed.xml`).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,

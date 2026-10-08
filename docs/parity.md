@@ -53,7 +53,9 @@ timezone-correct dates, `permalink_style` (pretty/date/none/ordinal),
 `exclude`/`include` config, nested pages, front-matter-less files as static,
 parenthesized `{% if %}`/`{% elsif %}`/`{% unless %}` conditions (e.g.
 beautiful-jekyll's `(site.title != pagetitle)` — grouping parens stripped
-before LiquidJS parses; Ruby Liquid parity).
+before LiquidJS parses; Ruby Liquid parity),
+static files emitted verbatim by build() (`_sass/` excluded),
+.xml/.json files with front matter rendered as pages.
 
 ## Known gaps
 

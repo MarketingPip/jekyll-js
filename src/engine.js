@@ -1169,7 +1169,17 @@ export class JekyllEngine {
       // files WITH a YAML front matter block as convertible documents.
       // A .md file without front matter (e.g., CHANGELOG.md, README.md)
       // is a static file, not a page. We check for the `---` marker.
-      if (/\.(md|markdown|html|liquid)$/i.test(path)) {
+      //
+      // FIX (xml/json pages were never rendered): themes ship
+      // convertible feeds and data files with front matter -- hyde's
+      // atom.xml, beautiful-jekyll's feed.xml / searchcorpus.json,
+      // chirpy's feed.xml / search.json / site.webmanifest. Real Jekyll
+      // (document.rb, convertible.rb) treats any file with front matter
+      // as convertible, so .xml/.json join the page set here. Files
+      // without front matter still fall through to the static-file
+      // branch below. Markdown conversion stays gated on .md/.markdown
+      // in _renderPage, so these are Liquid-rendered only.
+      if (/\.(md|markdown|html|liquid|xml|json)$/i.test(path)) {
         const hasFrontMatter = content.startsWith('---\n') || content.startsWith('---\r\n');
         if (hasFrontMatter) {
           this._rootPages.push({ path, content });
@@ -1219,6 +1229,13 @@ export class JekyllEngine {
       }
 
       if (!/\.(md|markdown|html|htm|liquid)$/i.test(path)) {
+        // FIX (static-file emission, _sass parity): _sass/ is Jekyll
+        // infrastructure (entry_filter.rb) -- never copied to the
+        // destination. isSassAsset() already claimed the compilable
+        // entry points above; anything reaching here (partials,
+        // underscore-prefixed files) must not be tracked as a static
+        // file at all, matching real Jekyll's site.static_files.
+        if (path.startsWith('_sass/')) continue;
         const slashIdx = path.lastIndexOf('/');
         const name = slashIdx === -1 ? path : path.slice(slashIdx + 1);
         const extname = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
@@ -1884,6 +1901,31 @@ export class JekyllEngine {
     }
 
     this.options.logger(`Engine fully rendered ${results.length} virtual files.`, 'success');
+
+    // FIX (static files were never emitted): useVFS() tracks every
+    // non-page asset (images, CSS, JS, fonts, .xml/.json WITHOUT front
+    // matter, ...) into this._staticFiles (Jekyll's site.static_files),
+    // but build() never wrote them out -- full-theme testing found
+    // minimal-mistakes missing 185 assets. Emit them verbatim: Jekyll
+    // copies static files as-is to their relative destination, so the
+    // permalink is the tracked path itself (leading slash, as Jekyll's
+    // StaticFileDrop#path) and `data` is empty. `path` follows the
+    // _renderPage convention (VFS path, no leading slash); the tracked
+    // path's leading `/` is stripped when reading from vfsTemplates,
+    // whose keys have no leading slash.
+    for (const staticFile of this._staticFiles) {
+      const vfsPath = staticFile.path.startsWith('/')
+        ? staticFile.path.slice(1)
+        : staticFile.path;
+      const staticResult = {
+        path: vfsPath,
+        permalink: staticFile.path,
+        data: {},
+        content: this.vfsTemplates[vfsPath],
+      };
+      results.push(staticResult);
+      if (this.options.stdout) this.options.stdout(staticResult);
+    }
 
     // FIX (SCSS assets pipeline): compile all tracked SCSS/Sass assets.
     // Done after template rendering so the full VFS (including any
