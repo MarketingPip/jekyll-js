@@ -210,6 +210,27 @@ function parseLocalDate(dateStr) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// FIX (YAML merge keys): js-yaml 5.x dropped the `!!merge` tag from its
+// default schema, so `<<: *anchor` stopped resolving (the merge key was
+// left as a literal `"<<"` property). Ruby's Psych resolves merge keys,
+// so re-enable them for data loads (js-yaml README documents exactly
+// this: CORE_SCHEMA.withTags(mergeTag)).
+const YAML_MERGE_SCHEMA = yaml.CORE_SCHEMA.withTags(yaml.mergeTag);
+
+// Set a parsed data value at a nested key path, creating intermediate
+// objects (Jekyll nests _data subdirectories: _data/a/b.yml becomes
+// site.data.a.b).
+function setNestedDataKey(obj, keys, value) {
+  let cur = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (typeof cur[keys[i]] !== 'object' || cur[keys[i]] === null) {
+      cur[keys[i]] = {};
+    }
+    cur = cur[keys[i]];
+  }
+  cur[keys[keys.length - 1]] = value;
+}
+
 // Resolves and normalizes categories following Jekyll standards
 function getPostCategories(frontMatter, filepath) {
   const categories = [];
@@ -314,7 +335,13 @@ function generatePermalink(frontMatter, slug, date, config = {}) {
     const cats = Array.isArray(frontMatter.categories)
       ? frontMatter.categories
       : String(frontMatter.categories).split(/\s+/);
-    categoriesStr = cats.map((c) => slugify(c)).filter(Boolean).join('/');
+    // FIX (:categories slugified in permalinks): Jekyll's UrlDrop#categories
+    // (jekyll/drops/url_drop.rb) downcases each category name and joins
+    // them RAW with "/", never slugifying -- real Jekyll emits
+    // /post formats/..., not /post-formats/...
+    categoriesStr = [
+      ...new Set(cats.map((c) => String(c).toLowerCase()).filter(Boolean)),
+    ].join('/');
   }
 
   let path = pattern
@@ -952,6 +979,14 @@ export class JekyllEngine {
 
       this.vfsTemplates[path] = content;
 
+      // FIX (drafts): real Jekyll only reads _drafts/ when `show_drafts`
+      // is set; without it drafts are excluded from the build entirely --
+      // not posts, not pages, not static files. (The post branch below
+      // already skipped them as posts, but they fell through and were
+      // ingested as nested pages.)
+      const isDraft = path.includes('_drafts/');
+      if (isDraft && !this._config.show_drafts) continue;
+
       if (path === '_config.yml' || path === '_config.yaml') {
         continue; // already parsed above
       }
@@ -965,8 +1000,14 @@ export class JekyllEngine {
       }
       if (path.startsWith('_data/')) {
         try {
-          const name = path.replace('_data/', '').replace(/\.[^/.]+$/, '');
-          this._data[name] = yaml.load(content);
+          // FIX (_data subdirs flattened): Jekyll nests subdirectories --
+          // _data/subdir/file.yml is site.data.subdir.file, not a flat
+          // "subdir/file" key (verified against the native Jekyll oracle).
+          // FIX (YAML merge keys unresolved): parse with the merge tag
+          // enabled so `<<: *anchor` resolves like Ruby's Psych.
+          const rel = path.replace('_data/', '').replace(/\.[^/.]+$/, '');
+          const parsed = yaml.load(content, { schema: YAML_MERGE_SCHEMA });
+          setNestedDataKey(this._data, rel.split('/'), parsed);
         } catch (e) {
           // Jekyll parity (data_reader.rb: read_data_file has no rescue):
           // a broken _data file is fatal.
@@ -978,9 +1019,8 @@ export class JekyllEngine {
       // FIX (.markdown posts): Jekyll accepts both `.md` and `.markdown`
       // as post file extensions. The original `parsePostFilename` only
       // matched `.md`.
-      // FIX (drafts): real Jekyll only reads _drafts/ when `show_drafts`
-      // is set; drafts are otherwise never posts.
-      const isDraft = path.includes('_drafts/');
+      // (Draft gating moved up: _drafts/ is skipped entirely without
+      // `show_drafts`; reaching here means drafts are enabled.)
       if (path.includes('_posts/') || (isDraft && this._config.show_drafts)) {
         const dirTag = isDraft ? '_drafts/' : '_posts/';
         const filename = path.slice(path.indexOf(dirTag) + dirTag.length);

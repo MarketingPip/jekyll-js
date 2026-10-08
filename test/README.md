@@ -42,6 +42,9 @@ Suite layout (run everything with `npm test` from the repo root):
   all oracle-grounded against jekyll 4.4.1 + liquid 4.0.4),
   and `scss-liquid.test.js` (Liquid rendered in `.scss` before Sass compiles —
   `{{ site.* }}`, `{% if %}`/`{% assign %}`, plus @import regression).
+  and `pipeline-fixes.test.js` (read/discovery pipeline: `_drafts/` excluded
+  without `show_drafts`, `:categories` joined raw (not slugified) in permalinks,
+  YAML merge keys resolve in `_data`, `_data` subdirectories nest).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,
