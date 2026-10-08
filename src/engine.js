@@ -1612,6 +1612,33 @@ export class JekyllEngine {
             excerpt: attributes.excerpt || postMeta._excerpt || '',
           }
         : {};
+    // FIX (page.id/page.collection/page.next/page.previous were never
+    // set): real Jekyll's DocumentDrop exposes these on every collection
+    // document and themes depend on them -- page.id for og tags and
+    // minimal-mistakes related posts, page.next/page.previous for
+    // prev/next post nav (beautiful-jekyll), page.collection for
+    // archive/tag/category headings (chirpy). id follows the existing
+    // site.posts convention (Document#id: dirname(url) + slug, i.e. the
+    // permalink minus .html and trailing slash, e.g. /2026/01/02/second).
+    // next is the NEWER post, previous the OLDER one
+    // (Document#next_doc/#previous_doc over the newest-first site.posts
+    // array). Regular pages get none of these (all nil in real Jekyll --
+    // verified against Jekyll 4.4.1 output and document.rb/drop sources).
+    let identityFields = {};
+    if (isPost && postMeta) {
+      const collectionName =
+        Object.keys(this._collections).find((name) => postMeta.path.startsWith(`_${name}/`)) || 'posts';
+      identityFields.collection = collectionName;
+      identityFields.id = (postMeta._permalink || '').replace(/\.html$/, '').replace(/\/$/, '');
+      if (collectionName === 'posts') {
+        const sitePosts = siteCtx.site.posts || [];
+        const idx = sitePosts.findIndex((p) => p.path === postMeta.path);
+        if (idx !== -1) {
+          identityFields.next = idx > 0 ? sitePosts[idx - 1] : null;
+          identityFields.previous = idx < sitePosts.length - 1 ? sitePosts[idx + 1] : null;
+        }
+      }
+    }
     const pageCtx = {
       ...siteCtx,
       page: {
@@ -1619,6 +1646,7 @@ export class JekyllEngine {
         path,
         url: localPermalink,
         ...postFields,
+        ...identityFields,
       },
       // FIX (jekyll.environment was never injected): minima and many other
       // themes gate Google Analytics and Disqus behind
@@ -1644,6 +1672,13 @@ export class JekyllEngine {
     if (path.endsWith('.md') || path.endsWith('.markdown')) {
       rendered = parseMarkdown(rendered);
     }
+
+    // FIX (page.content was never set): real Jekyll exposes the page's
+    // rendered body content (post-conversion, pre-layout) as page.content
+    // -- beautiful-jekyll builds meta descriptions from it
+    // (`{{ page.content | strip_html | truncatewords: 50 }}`). It is the
+    // same value layouts receive as top-level `content`.
+    pageCtx.page.content = rendered;
 
     if (attributes.layout || postMeta?.layout) {
       rendered = await this._applyLayouts(rendered, attributes.layout || postMeta.layout, pageCtx);
