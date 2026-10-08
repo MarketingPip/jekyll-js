@@ -1773,11 +1773,48 @@ export class JekyllEngine {
           `in Node, or load dist/sass-plugin.js (sets window.JekyllSass) in the browser.`
       );
     }
+    // Compute the site context once for all Sass assets (below).
+    const sassSiteCtx = this._buildSiteContext();
     for (const asset of this._sassAssets) {
       this.options.logger(`Compiling Sass: ${asset.path}`, 'info');
+      // FIX (liquid in scss): real Jekyll renders Liquid in .scss/.sass
+      // files BEFORE Sass compilation (lib/jekyll/renderer.rb:
+      // Renderer#run renders Liquid first, then runs the converter chain
+      // including the Sass converter -- that's how themes inject
+      // `{{ site.x }}` / `{% if %}` into stylesheets). Order per real
+      // Jekyll: strip front matter → render Liquid → compile Sass.
+      const { attributes: assetAttrs, body: assetBody } = this._parseFrontMatter(
+        asset.path,
+        asset.content
+      );
+      const assetCtx = {
+        ...sassSiteCtx,
+        // FIX (liquid context): mirror _renderPage's page context so
+        // `{{ site.* }}` (and `page.*` / `jekyll.environment`) work in
+        // stylesheets exactly like they do in pages.
+        page: {
+          ...assetAttrs,
+          path: asset.path,
+          url: '/' + asset.path.replace(/\.(scss|sass)$/, '.css'),
+        },
+        jekyll: {
+          environment: this.options.environment || 'development',
+          version: '4.3.4',
+        },
+      };
+      let sassSource = assetBody;
+      try {
+        sassSource = await this.liquidEngine.parseAndRender(assetBody, assetCtx);
+      } catch (err) {
+        // Don't silently swallow the Liquid failure, but don't break the
+        // existing loud-on-Sass-error behavior either: warn here, then
+        // compile the raw content so the Sass error comment + warn still
+        // surface exactly as before.
+        this.options.logger(`Liquid render error in ${asset.path}: ${err.message}`, 'warn');
+      }
       const compiled = compileSassAsset(
         asset.path,
-        asset.content,
+        sassSource,
         this.vfsTemplates,
         this._config,
         this.options.sass

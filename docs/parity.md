@@ -41,7 +41,8 @@ paginator shape (`jekyll-paginate`), front-matter defaults
 
 Posts, drafts, pages, collections (output true/false, sorting, permalinks,
 `site.documents`), pagination, excerpts, `site.data`, static files,
-front-matter `defaults:`, Sass pipeline, `{% highlight %}`,
+front-matter `defaults:`, Sass pipeline (incl. Liquid rendered before Sass,
+per Renderer#run), `{% highlight %}`,
 `{% link %}`/`{% post_url %}`, `{% include_cached %}` (jekyll-include-cache),
 SEO/feed/sitemap/redirect plugins,
 timezone-correct dates, `permalink_style` (pretty/date/none/ordinal),
