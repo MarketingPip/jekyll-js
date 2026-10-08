@@ -115,12 +115,29 @@ before calling date-related work done. CI runs Node 20 + 22.
 
 ## Docs conventions
 
-- API changes: update `docs/api/` **and** add a `docs/api/CHANGELOG.md`
-  entry (version, what changed, migration). Old behavior stays recorded —
-  never delete, only supersede.
+- API changes: update JSDoc comments in `src/` **and** run `npm run gen:api` to regenerate `website/docs/api/`. Also add a `docs/api/CHANGELOG.md` entry (version, what changed, migration). Old behavior stays recorded — never delete, only supersede.
 - New user-facing behavior: update `README.md` if it belongs in the overview.
 - New tests: update `test/README.md` index.
 - Fixed a parity gap? Update `docs/parity.md` (move it from gaps to covered).
+- Type declarations: `npm run build:types` generates `.d.ts` from JSDoc via `tsc --emitDeclarationOnly`. Run before publishing.
+
+### Docs workflow (for AI agents)
+
+1. **JSDoc is the API source**: Write JSDoc comments in `src/*.js` with `@param`, `@returns`, `@example`. Be thorough — this generates both the `.d.ts` types AND the website API docs.
+2. **Guides are markdown**: Edit `website/docs/*.md` directly for tutorials, how-tos, explanations.
+3. **Regenerate API docs**: After changing JSDoc, run `npm run gen:api` (uses `jsdoc-to-markdown`).
+4. **Build types**: Run `npm run build:types` to update `dist/types/*.d.ts`.
+5. **Verify**: `cd website && npm run build` must succeed with no broken links.
+
+### Versioning policy
+
+**Do NOT version docs for every release.** Docusaurus versioning duplicates every page — only use it for breaking API changes.
+
+- Patch/minor with no API changes: DON'T version. Update the current docs.
+- Breaking API changes: `cd website && npm run docusaurus docs:version <x.y.z>` to snapshot.
+- The `v0.2.0` snapshot was premature and should be removed once the API stabilizes.
+
+See: https://docusaurus.io/docs/versioning#when-to-version
 
 ## Known gaps
 

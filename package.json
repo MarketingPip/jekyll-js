@@ -4,10 +4,16 @@
   "description": "Render Jekyll sites entirely in JavaScript — in the browser, in Node, anywhere. No Ruby required.",
   "type": "module",
   "main": "./src/engine.js",
-  "types": "./src/engine.d.ts",
+  "types": "./dist/types/engine.d.ts",
   "exports": {
-    ".": "./src/engine.js",
-    "./fs-vfs": "./src/fs-vfs.js"
+    ".": {
+      "types": "./dist/types/engine.d.ts",
+      "default": "./src/engine.js"
+    },
+    "./fs-vfs": {
+      "types": "./dist/types/fs-vfs.d.ts",
+      "default": "./src/fs-vfs.js"
+    }
   },
   "bin": {
     "jekyll-js": "./bin/jekyll-js.js"
@@ -17,6 +23,8 @@
     "oracle": "node test/oracle/harness.js",
     "build": "esbuild src/browser/index.js --bundle --platform=browser --format=iife --outfile=dist/jekyll-engine.js --minify && esbuild src/browser/sass.js --bundle --platform=browser --format=iife --outfile=dist/sass-plugin.js --minify && esbuild src/browser/highlight.js --bundle --platform=browser --format=iife --outfile=dist/highlight-plugin.js --minify",
     "build:playground": "npm run build && cp dist/jekyll-engine.js playground/dist/ && cp dist/sass-plugin.js playground/dist/ && cp dist/highlight-plugin.js playground/dist/",
+    "build:types": "tsc",
+    "gen:api": "cd website && npm run gen:api",
     "docs:build": "npm run build --prefix website"
   },
   "dependencies": {
@@ -32,6 +40,7 @@
     "esbuild": "^0.28.2",
     "jest": "^30.4.2",
     "jsdoc": "^4.0.5",
-    "memfs": "^4.80.0"
+    "memfs": "^4.80.0",
+    "typescript": "^7.0.2"
   }
 }
