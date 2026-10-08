@@ -37,6 +37,22 @@
     .scrollbar-thin::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
     .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #475569; }
     .glow-text { text-shadow: 0 0 20px rgba(6, 182, 212, 0.4); }
+
+    /* Reusable modal animations */
+    #modal-overlay {
+      transition: opacity 150ms ease-out;
+    }
+    #modal-overlay.modal-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #modal-dialog {
+      transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease-out;
+    }
+    #modal-overlay.modal-hidden #modal-dialog {
+      transform: scale(0.96) translateY(8px);
+      opacity: 0;
+    }
     
     /* Ensure Ace fits container */
     #editor {
@@ -209,17 +225,17 @@
 
   </main>
 
-  <!-- Modal Screen: Add File -->
-  <div id="modal-add" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center animate-fade-in">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-5 w-96 max-w-[90%] transform scale-100 transition-all">
-      <h3 class="text-sm font-semibold text-white mb-1">Create Virtual Resource</h3>
-      <p class="text-[11px] text-slate-400 mb-4 leading-relaxed">Specify full paths (directories will auto-create). Example: <code class="text-cyan-400 font-mono bg-slate-950 px-1 rounded">_posts/2026-06-22-demo.md</code></p>
-      
-      <input id="new-file-path" type="text" placeholder="e.g., _includes/header.html" class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 mb-4 font-mono">
-      
-      <div class="flex justify-end gap-2">
-        <button id="btn-cancel-add" class="px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors">Dismiss</button>
-        <button id="btn-confirm-add" class="px-4 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold rounded-lg transition-colors">Create Resource</button>
+  <!-- Reusable accessible modal (file/folder operations) -->
+  <div id="modal-overlay" class="modal-hidden fixed inset-0 z-[60] flex items-center justify-center backdrop-blur-md bg-slate-950/70 px-4">
+    <div id="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title"
+         class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-5">
+      <h3 id="modal-title" class="text-sm font-semibold text-white mb-1"></h3>
+      <div id="modal-desc" class="text-[11px] text-slate-400 mb-4 leading-relaxed"></div>
+      <div id="modal-body"></div>
+      <p id="modal-error" role="alert" class="hidden text-xs text-rose-400 font-medium mt-2"></p>
+      <div class="flex justify-end gap-2 mt-5">
+        <button id="modal-cancel" class="px-4 py-1.5 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">Cancel</button>
+        <button id="modal-confirm" class="px-4 py-1.5 text-xs font-bold rounded-lg transition-all active:scale-95"></button>
       </div>
     </div>
   </div>
@@ -441,8 +457,6 @@ Enjoy evaluating code execution locally inside memory!`,
     const buildBtn = document.getElementById('btn-build');
     const buildIcon = document.getElementById('build-icon');
     const buildText = document.getElementById('build-text');
-    const modalAdd = document.getElementById('modal-add');
-    const newFilePath = document.getElementById('new-file-path');
 
     // -------------------------------------------------------------
     // Initialize Ace Editor
@@ -524,13 +538,14 @@ Enjoy evaluating code execution locally inside memory!`,
     function buildTreeMap() {
       const rootMap = {};
       Object.keys(vfs).sort().forEach(path => {
-        // `.gitkeep` is a folder placeholder — present in the VFS so the
-        // engine never sees an empty dir, but hidden from the tree UI.
-        if (path.split('/').pop() === '.gitkeep') return;
         const steps = path.split('/');
         let cursor = rootMap;
         steps.forEach((step, idx) => {
           if (idx === steps.length - 1) {
+            // `.gitkeep` is a folder placeholder — present in the VFS so the
+            // engine never sees an empty dir, but hidden from the tree UI.
+            // The directory itself is still rendered so empty folders are visible.
+            if (step === '.gitkeep') return;
             cursor[step] = { _type: 'file', filepath: path };
           } else {
             cursor[step] ||= { _type: 'dir', children: {} };
@@ -638,16 +653,25 @@ Enjoy evaluating code execution locally inside memory!`,
         addFileBtn.className = 'text-slate-500 hover:text-cyan-400 p-0.5 rounded transition-colors';
         addFileBtn.title = 'New file in ' + name;
         addFileBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>';
-        addFileBtn.onclick = (e) => { e.stopPropagation(); promptNewFile(dirPath); };
+        addFileBtn.addEventListener('click', (e) => { e.stopPropagation(); openNewFileModal(dirPath); });
 
         const addDirBtn = document.createElement('button');
         addDirBtn.className = 'text-slate-500 hover:text-cyan-400 p-0.5 rounded transition-colors';
         addDirBtn.title = 'New folder in ' + name;
+        addDirBtn.setAttribute('aria-label', 'New folder in ' + name);
         addDirBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>';
-        addDirBtn.onclick = (e) => { e.stopPropagation(); promptNewFolder(dirPath); };
+        addDirBtn.addEventListener('click', (e) => { e.stopPropagation(); openNewFolderModal(dirPath); });
+
+        const delDirBtn = document.createElement('button');
+        delDirBtn.className = 'text-slate-500 hover:text-rose-400 p-0.5 rounded transition-colors';
+        delDirBtn.title = 'Delete folder ' + name;
+        delDirBtn.setAttribute('aria-label', 'Delete folder ' + name);
+        delDirBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>';
+        delDirBtn.addEventListener('click', (e) => { e.stopPropagation(); openDeleteFolderModal(dirPath); });
 
         actions.appendChild(addFileBtn);
         actions.appendChild(addDirBtn);
+        actions.appendChild(delDirBtn);
         header.appendChild(actions);
 
         // Hover to reveal actions
@@ -662,7 +686,7 @@ Enjoy evaluating code execution locally inside memory!`,
             setupFileTree();
           } else {
             // Empty folder: prompt to create first file
-            promptNewFile(dirPath);
+            openNewFileModal(dirPath);
           }
         };
 
@@ -705,55 +729,272 @@ Enjoy evaluating code execution locally inside memory!`,
     }
 
     // -------------------------------------------------------------
-    // Inline file/folder creation prompts (no modal needed)
+    // Reusable accessible modal system
     // -------------------------------------------------------------
-    function promptNewFile(parentDir) {
-      const name = prompt('New file name in ' + (parentDir || 'root') + ':');
-      if (!name) return;
-      const fullPath = parentDir ? parentDir + '/' + name : name;
-      if (vfs[fullPath]) {
-        alert('A file with that name already exists.');
-        return;
-      }
-      vfs[fullPath] = '';
-      syncEditorFile(fullPath);
-      setupFileTree();
-      // Auto-expand the parent
-      if (parentDir) {
-        const parts = parentDir.split('/');
-        let p = '';
-        for (const part of parts) {
-          p = p ? p + '/' + part : part;
-          treeState[p] = true;
-        }
-        setupFileTree();
-      }
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modalDialog = document.getElementById('modal-dialog');
+    const modalTitle = document.getElementById('modal-title');
+    const modalDesc = document.getElementById('modal-desc');
+    const modalBody = document.getElementById('modal-body');
+    const modalError = document.getElementById('modal-error');
+    const modalCancel = document.getElementById('modal-cancel');
+    const modalConfirm = document.getElementById('modal-confirm');
+
+    let modalPrevFocus = null;   // element that had focus before the modal opened
+    let modalOnConfirm = null;   // confirm callback for the currently open modal
+    let modalKeyHandler = null;  // bound keydown handler (removed on close)
+
+    function escHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
 
-    function promptNewFolder(parentDir) {
-      const name = prompt('New folder name in ' + (parentDir || 'root') + ':');
-      if (!name) return;
-      if (name.includes('/')) {
-        alert('Folder names cannot contain slashes. Create nested folders one at a time.');
-        return;
+    function openModal({ title, desc = '', bodyHTML = '', confirmLabel = 'Confirm', confirmKind = 'primary', onConfirm = null }) {
+      modalPrevFocus = document.activeElement;
+      modalTitle.textContent = title;
+      modalDesc.innerHTML = desc;
+      modalBody.innerHTML = bodyHTML;
+      modalError.textContent = '';
+      modalError.classList.add('hidden');
+
+      modalConfirm.textContent = confirmLabel;
+      modalConfirm.className =
+        'px-4 py-1.5 text-xs font-bold rounded-lg transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 ' +
+        (confirmKind === 'danger'
+          ? 'bg-rose-600 hover:bg-rose-500 text-white focus:ring-rose-400'
+          : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 focus:ring-cyan-400');
+      modalOnConfirm = onConfirm;
+
+      modalOverlay.classList.remove('modal-hidden');
+      document.body.style.overflow = 'hidden';
+
+      // Focus trap + ESC handling (listener removed on close)
+      modalKeyHandler = (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeModal();
+          return;
+        }
+        if (e.key !== 'Tab') return;
+        const focusable = modalDialog.querySelectorAll(
+          'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      };
+      modalDialog.addEventListener('keydown', modalKeyHandler);
+
+      // Initial focus: the input when present; for destructive dialogs focus
+      // Cancel so Enter never confirms a delete by accident.
+      requestAnimationFrame(() => {
+        const input = modalDialog.querySelector('input');
+        if (input) input.focus();
+        else if (confirmKind === 'danger') modalCancel.focus();
+        else modalConfirm.focus();
+      });
+    }
+
+    function modalShowError(msg) {
+      modalError.textContent = msg;
+      modalError.classList.remove('hidden');
+    }
+
+    function closeModal() {
+      modalOverlay.classList.add('modal-hidden');
+      document.body.style.overflow = '';
+      if (modalKeyHandler) {
+        modalDialog.removeEventListener('keydown', modalKeyHandler);
+        modalKeyHandler = null;
       }
-      const fullPath = parentDir ? parentDir + '/' + name : name;
-      if (vfs[fullPath]) {
-        alert('A file or folder with that name already exists.');
-        return;
+      modalOnConfirm = null;
+      modalBody.innerHTML = '';
+      if (modalPrevFocus && typeof modalPrevFocus.focus === 'function') {
+        modalPrevFocus.focus();
       }
-      // Create a placeholder file so the folder appears in the tree
-      vfs[fullPath + '/.gitkeep'] = '';
-      // Auto-expand the path
-      treeState[fullPath] = true;
-      const parts = fullPath.split('/');
+      modalPrevFocus = null;
+    }
+
+    modalCancel.addEventListener('click', closeModal);
+    modalOverlay.addEventListener('click', (e) => {
+      if (e.target === modalOverlay) closeModal();
+    });
+    modalConfirm.addEventListener('click', () => {
+      if (modalOnConfirm) modalOnConfirm();
+    });
+
+    // -------------------------------------------------------------
+    // File / folder operations (all go through the modal)
+    // -------------------------------------------------------------
+    function dirName(p) {
+      const i = p.lastIndexOf('/');
+      return i === -1 ? '' : p.slice(0, i);
+    }
+
+    // Mark every segment of a directory path as expanded so the tree
+    // reveals newly created items.
+    function expandDir(dirPath) {
+      if (!dirPath) return;
       let p = '';
-      for (const part of parts) {
+      for (const part of dirPath.split('/')) {
         p = p ? p + '/' + part : part;
         treeState[p] = true;
       }
-      setupFileTree();
-      log('info', 'Folder created: ' + fullPath + '/');
+    }
+
+    function nameInputHTML(label, placeholder) {
+      return (
+        '<label class="block text-[11px] font-medium text-slate-400 mb-1.5" for="modal-name-input">' + escHtml(label) + '</label>' +
+        '<input id="modal-name-input" type="text" placeholder="' + escHtml(placeholder) + '" autocomplete="off" spellcheck="false" ' +
+        'class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 font-mono">'
+      );
+    }
+
+    // Wire Enter-to-submit on the modal's name input.
+    function submitOnEnter() {
+      const input = document.getElementById('modal-name-input');
+      if (input) {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            modalConfirm.click();
+          }
+        });
+      }
+    }
+
+    function openNewFileModal(parentDir) {
+      const where = parentDir
+        ? ' in <code class="text-cyan-400 font-mono bg-slate-950 px-1 rounded">' + escHtml(parentDir) + '</code>'
+        : ' at the workspace root';
+      openModal({
+        title: 'New file',
+        desc: 'Create a file' + where + '. Slashes create nested folders automatically.',
+        bodyHTML: nameInputHTML('File name or path', 'e.g. _posts/2026-10-08-hello.md'),
+        confirmLabel: 'Create file',
+        confirmKind: 'primary',
+        onConfirm: () => {
+          const input = document.getElementById('modal-name-input');
+          const name = input.value.trim().replace(/^\/+/, '');
+          if (!name) {
+            modalShowError('Please enter a file name.');
+            input.focus();
+            return;
+          }
+          const fullPath = parentDir ? parentDir + '/' + name : name;
+          if (vfs[fullPath] || Object.keys(vfs).some((k) => k === fullPath || k.startsWith(fullPath + '/'))) {
+            modalShowError('A file or folder with that name already exists.');
+            input.focus();
+            input.select();
+            return;
+          }
+          vfs[fullPath] = '';
+          expandDir(dirName(fullPath));
+          closeModal();
+          syncEditorFile(fullPath);
+          setupFileTree();
+          log('info', 'File created: ' + fullPath);
+        },
+      });
+      submitOnEnter();
+    }
+
+    function openNewFolderModal(parentDir) {
+      const where = parentDir
+        ? ' inside <code class="text-cyan-400 font-mono bg-slate-950 px-1 rounded">' + escHtml(parentDir) + '</code>'
+        : ' at the workspace root';
+      openModal({
+        title: 'New folder',
+        desc: 'Create a folder' + where + '.',
+        bodyHTML: nameInputHTML('Folder name', 'e.g. assets'),
+        confirmLabel: 'Create folder',
+        confirmKind: 'primary',
+        onConfirm: () => {
+          const input = document.getElementById('modal-name-input');
+          const name = input.value.trim();
+          if (!name) {
+            modalShowError('Please enter a folder name.');
+            input.focus();
+            return;
+          }
+          if (name.includes('/')) {
+            modalShowError('Folder names cannot contain slashes — create nested folders one at a time.');
+            input.focus();
+            input.select();
+            return;
+          }
+          const fullPath = parentDir ? parentDir + '/' + name : name;
+          if (vfs[fullPath] || Object.keys(vfs).some((k) => k === fullPath || k.startsWith(fullPath + '/'))) {
+            modalShowError('A file or folder with that name already exists.');
+            input.focus();
+            input.select();
+            return;
+          }
+          // Placeholder so the (virtual) folder appears in the tree.
+          vfs[fullPath + '/.gitkeep'] = '';
+          expandDir(fullPath);
+          treeState[fullPath] = true;
+          closeModal();
+          setupFileTree();
+          log('info', 'Folder created: ' + fullPath + '/');
+        },
+      });
+      submitOnEnter();
+    }
+
+    function openDeleteFileModal(filepath) {
+      openModal({
+        title: 'Delete file?',
+        desc: 'This will permanently delete <code class="text-rose-400 font-mono bg-slate-950 px-1 rounded">' + escHtml(filepath) + '</code>. This cannot be undone.',
+        confirmLabel: 'Delete',
+        confirmKind: 'danger',
+        onConfirm: () => {
+          delete vfs[filepath];
+          closeModal();
+          const remaining = Object.keys(vfs)[0];
+          if (remaining) syncEditorFile(remaining);
+          setupFileTree();
+          log('warn', 'Deleted file: ' + filepath);
+        },
+      });
+    }
+
+    function openDeleteFolderModal(dirPath) {
+      const prefix = dirPath + '/';
+      const doomed = Object.keys(vfs).filter((k) => k === dirPath || k.startsWith(prefix));
+      const visible = doomed.filter((k) => k.split('/').pop() !== '.gitkeep');
+      openModal({
+        title: 'Delete folder?',
+        desc:
+          'This will permanently delete the folder <code class="text-rose-400 font-mono bg-slate-950 px-1 rounded">' + escHtml(dirPath) + '</code> ' +
+          'and ' + (visible.length === 1 ? 'the 1 file' : 'all ' + visible.length + ' files') + ' inside it. This cannot be undone.',
+        confirmLabel: 'Delete',
+        confirmKind: 'danger',
+        onConfirm: () => {
+          if (doomed.length >= Object.keys(vfs).length) {
+            modalShowError('This would delete every file in the workspace. Delete files individually instead.');
+            return;
+          }
+          for (const k of doomed) delete vfs[k];
+          closeModal();
+          if (!vfs[currentFile]) {
+            const remaining = Object.keys(vfs)[0];
+            if (remaining) syncEditorFile(remaining);
+          }
+          setupFileTree();
+          log('warn', 'Deleted folder: ' + dirPath + '/ (' + visible.length + ' file(s))');
+        },
+      });
     }
 
     // -------------------------------------------------------------
@@ -998,39 +1239,19 @@ console.log(pages)
     // File Manipulation Controls
     // -------------------------------------------------------------
     document.getElementById('btn-add-file').addEventListener('click', () => {
-      modalAdd.classList.remove('hidden');
-      newFilePath.focus();
+      openNewFileModal('');
     });
 
-    document.getElementById('btn-cancel-add').addEventListener('click', () => {
-      modalAdd.classList.add('hidden');
-      newFilePath.value = '';
-    });
-
-    document.getElementById('btn-confirm-add').addEventListener('click', () => {
-      const path = newFilePath.value.trim();
-      if (path) {
-        if (!vfs[path]) {
-          vfs[path] = '';
-          syncEditorFile(path);
-          setupFileTree();
-        }
-        modalAdd.classList.add('hidden');
-        newFilePath.value = '';
-      }
+    document.getElementById('btn-add-folder').addEventListener('click', () => {
+      openNewFolderModal('');
     });
 
     document.getElementById('btn-delete-file').addEventListener('click', () => {
       if (Object.keys(vfs).length <= 1) {
-        alert('Action aborted. At least one file must exist in workspace.');
+        log('warn', 'Action aborted — at least one file must exist in the workspace.');
         return;
       }
-      if (confirm(`Remove "${currentFile}" permanently from virtual storage?`)) {
-        delete vfs[currentFile];
-        const remaining = Object.keys(vfs)[0];
-        syncEditorFile(remaining);
-        setupFileTree();
-      }
+      openDeleteFileModal(currentFile);
     });
 
     document.getElementById('btn-reset').addEventListener('click', () => {
@@ -1040,12 +1261,6 @@ console.log(pages)
         setupFileTree();
         log('info', 'Workspace reset completed.');
       }
-    });
-
-    // Handle Modal Keybinds
-    newFilePath.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') document.getElementById('btn-confirm-add').click();
-      if (e.key === 'Escape') document.getElementById('btn-cancel-add').click();
     });
 
     buildBtn.addEventListener('click', executeCompile);
