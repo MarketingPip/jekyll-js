@@ -242,22 +242,31 @@ function registerSeoTag(engine) {
         }
       }
 
-      // Author handling (mirrors AuthorDrop logic)
+      // Author handling (mirrors AuthorDrop logic, author_drop.rb)
+      // Resolved author sources (in order): page.author,
+      // page.authors.first, site.author. A string author is also looked
+      // up in site.data.authors for metadata (not needed here).
       let authorName = null;
       let authorTwitter = null;
-      if (page.author) {
-        if (typeof page.author === 'string') {
-          authorName = page.author;
-        } else if (typeof page.author === 'object') {
-          authorName = page.author.name;
-          authorTwitter = page.author.twitter;
-        }
-      } else if (site.author) {
-        if (typeof site.author === 'string') {
-          authorName = site.author;
-        } else if (typeof site.author === 'object') {
-          authorName = site.author.name;
-          authorTwitter = site.author.twitter;
+      {
+        const authorsArray = Array.isArray(page.authors) ? page.authors[0] : undefined;
+        const resolvedAuthor = [page.author, authorsArray, site.author].find(
+          (a) => a !== undefined && a !== null && String(a) !== ''
+        );
+        if (resolvedAuthor !== undefined) {
+          let authorHash = null;
+          if (typeof resolvedAuthor === 'string') {
+            authorName = resolvedAuthor;
+          } else if (typeof resolvedAuthor === 'object') {
+            authorHash = resolvedAuthor;
+            authorName = resolvedAuthor.name;
+          }
+          // AuthorDrop#twitter: author_hash["twitter"] || author_hash["name"],
+          // with a leading @ stripped (template re-adds it).
+          const rawTwitter = (authorHash && authorHash.twitter) || authorName;
+          if (typeof rawTwitter === 'string' && rawTwitter !== '') {
+            authorTwitter = rawTwitter.replace(/^@/, '');
+          }
         }
       }
 
@@ -271,29 +280,41 @@ function registerSeoTag(engine) {
           '@context': 'https://schema.org',
         };
 
-        // @type
-        let type = 'WebPage';
-        if (page.date) {
-          type = 'BlogPosting';
-        } else if (page.url) {
+        // @type — Drop#type precedence (drop.rb): page_seo["type"],
+        // then homepage_or_about?, then page["date"], else "WebPage".
+        // FIX (theme drift): homepage check must come BEFORE the date
+        // check (an /about/ page with a date is still WebSite), and
+        // `seo.type` front matter overrides the computed type.
+        const pageSeo = page.seo && typeof page.seo === 'object' ? page.seo : {};
+        let type;
+        if (pageSeo.type) {
+          type = pageSeo.type;
+        } else if (/^\/(about\/)?(index\.html?)?$/.test(page.url || '')) {
           // FIX (oracle-found): real gem uses HOMEPAGE_OR_ABOUT_REGEX =
           // /^/(about/)?(index.html?)?$/ — matches /,/index.html,/about/,/about/index.html
           // but NOT /about.html (without trailing slash)
-          const homepageOrAbout = /^\/(about\/)?(index\.html?)?$/.test(page.url);
-          if (homepageOrAbout) type = 'WebSite';
+          type = 'WebSite';
+        } else if (page.date) {
+          type = 'BlogPosting';
+        } else {
+          type = 'WebPage';
         }
         jsonLd['@type'] = type;
 
         // description (before headline/name, per real gem)
-        if (description) jsonLd.description = description;
+        // FIX (theme drift): JSON-LD string fields must be strings —
+        // the gem's format_string (markdownify/strip_html) stringifies
+        // non-string front matter (e.g. integer `title: 404`), so
+        // "headline":404 (invalid JSON) can never occur.
+        if (description) jsonLd.description = String(description);
 
         // headline (page title)
-        if (pageTitle) jsonLd.headline = pageTitle;
+        if (pageTitle) jsonLd.headline = String(pageTitle);
 
         // name: only for WebSite (homepage/about). Real gem returns nil
         // for other pages (drop.rb:76-87).
         if (type === 'WebSite') {
-          if (site.title) jsonLd.name = site.title;
+          if (site.title) jsonLd.name = String(site.title);
         }
 
         // url (canonical) - real gem always outputs, even without site.url
@@ -315,13 +336,13 @@ function registerSeoTag(engine) {
         if (authorName) {
           jsonLd.author = {
             '@type': 'Person',
-            name: authorName,
+            name: String(authorName),
           };
         }
 
         // image
         if (imagePath) {
-          jsonLd.image = imagePath;
+          jsonLd.image = String(imagePath);
         }
 
         // publisher (if logo)
@@ -333,7 +354,7 @@ function registerSeoTag(engine) {
               url: site.logo,
             },
           };
-          if (authorName) jsonLd.publisher.name = authorName;
+          if (authorName) jsonLd.publisher.name = String(authorName);
         }
 
         // mainEntityOfPage
@@ -427,12 +448,15 @@ function registerSeoTag(engine) {
       if (imagePath) {
         const twitterCard = page.twitter?.card || site.twitter?.card || 'summary_large_image';
         lines.push(`<meta name="twitter:card" content="${twitterCard}" />`);
-        lines.push(`<meta property="twitter:image" content="${escapeHtml(imagePath)}" />`);
+        // FIX (theme drift): real gem template.html uses name= for
+        // twitter:image (and twitter:title), not property=.
+        lines.push(`<meta name="twitter:image" content="${escapeHtml(imagePath)}" />`);
       } else {
         lines.push(`<meta name="twitter:card" content="summary" />`);
       }
       if (imageAlt) lines.push(`<meta name="twitter:image:alt" content="${escapeHtml(stripHtml(imageAlt))}" />`);
-      if (pageTitle) lines.push(`<meta property="twitter:title" content="${escapeHtml(stripHtml(pageTitle))}" />`);
+      // FIX (theme drift): real gem emits <meta name="twitter:title" ...>.
+      if (pageTitle) lines.push(`<meta name="twitter:title" content="${escapeHtml(stripHtml(pageTitle))}" />`);
 
       // Twitter site/creator
       if (site.twitter?.username) {
@@ -440,8 +464,10 @@ function registerSeoTag(engine) {
         lines.push(`<meta name="twitter:site" content="@${twitterSite}" />`);
       }
       if (authorTwitter) {
-        const twitterCreator = authorTwitter.replace('@', '');
-        lines.push(`<meta name="twitter:creator" content="@${twitterCreator}" />`);
+        // authorTwitter is already stripped of a leading @ (AuthorDrop#twitter);
+        // the template re-adds it. Falls back to the author name when no
+        // twitter handle is configured (drop.rb/author_drop.rb).
+        lines.push(`<meta name="twitter:creator" content="@${authorTwitter}" />`);
       }
 
       // Facebook meta
