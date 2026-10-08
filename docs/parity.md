@@ -24,7 +24,11 @@ Verified-against-oracle (byte-identical to real Jekyll 4.3.4):
 - **Minima 2.5.1 theme**: index.html, about.html byte-identical
 - **Liquid filters**: date_to_xmlschema, date_to_rfc822, xml_escape, cgi_escape,
   uri_escape, number_of_words, array_to_sentence_string, smartify, slugify,
-  where_exp, group_by — all match
+  where_exp, group_by (nil keys stringify to `""`, groups carry
+  name/items/size), uniq (nested arrays flattened first), split (`" "` splits
+  on whitespace runs), escape (nil stays nil), where (Jekyll's
+  compare_property_vs_target: `0` matches `0`/`"0"`, `false` matches
+  `false`/`"false"`, nil matches only nil) — all match
 - **Page URLs**: /about.html (not /about/) matches Jekyll default
 - **Timezones**: date_to_xmlschema outputs local offset (-05:00), not UTC
 - **Sass**: expanded output by default (matches jekyll-sass-converter)
@@ -68,6 +72,14 @@ mistaken for bugs:
   build (Jekyll is fatal). Rationale: live-preview friendliness — one
   broken stylesheet shouldn't kill the whole preview.
 - **`build()` is async** (Jekyll's is sync) — LiquidJS rendering is async.
+- **`{{ str[0] }}`**: Ruby Liquid returns `""` for integer index into a
+  string; LiquidJS returns the first character. The lookup lives deep in
+  LiquidJS's `Context#readProperty` with no override hook — unfixable without
+  patching LiquidJS, so it stays divergent (documented in
+  `test/parity/filter-semantics.test.js` as a skipped test).
+- **Single-argument `where:`**: Ruby Jekyll raises ArgumentError
+  ("Liquid error: wrong number of arguments"); we treat a missing value like
+  an explicit nil (matches only nil properties) instead of failing the build.
 
 ## Methodology
 
