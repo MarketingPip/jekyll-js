@@ -102,9 +102,14 @@ const apiDir = join(websiteDir, 'docs', 'api');
 mkdirSync(apiDir, { recursive: true });
 
 // Section category metadata for the Docusaurus sidebar.
+// NOTE: do NOT set link.type to 'generated-index' here: the folder already
+// has an index.md landing page, and combining both breaks the build
+// (Docusaurus emits a second /docs/category/api-reference route and the
+// sidebar metadata for docs pages comes back undefined -> SSG crash
+// "Cannot read properties of undefined (reading 'id')" in DocItem).
 writeFileSync(
   join(apiDir, '_category_.json'),
-  JSON.stringify({ label: 'API Reference', position: 20, link: { type: 'generated-index' } }, null, 2) + '\n'
+  JSON.stringify({ label: 'API Reference', position: 20 }, null, 2) + '\n'
 );
 
 const hasJsDoc = (srcPath) => readFileSync(srcPath, 'utf8').includes('/**');
