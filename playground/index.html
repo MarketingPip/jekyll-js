@@ -520,6 +520,10 @@ Enjoy evaluating code execution locally inside memory!`,
     // -------------------------------------------------------------
     // treeState tracks folder expansion: { "_posts": true, "_includes": false }
     const treeState = {};
+    // Explicitly-created folders that contain no files yet. Kept separate
+    // from the VFS so folders can be truly empty (no placeholder files).
+    // Entries are removed once a real file lands inside them.
+    const emptyDirs = new Set();
 
     function getFileIcon(filepath, name) {
       if (filepath === '_config.yml') return '⚙️';
@@ -537,14 +541,21 @@ Enjoy evaluating code execution locally inside memory!`,
 
     function buildTreeMap() {
       const rootMap = {};
+      const ensureDir = (path) => {
+        const steps = path.split('/');
+        let cursor = rootMap;
+        steps.forEach((step) => {
+          cursor[step] ||= { _type: 'dir', children: {} };
+          cursor = cursor[step].children;
+        });
+      };
       Object.keys(vfs).sort().forEach(path => {
         const steps = path.split('/');
         let cursor = rootMap;
         steps.forEach((step, idx) => {
           if (idx === steps.length - 1) {
-            // `.gitkeep` is a folder placeholder — present in the VFS so the
-            // engine never sees an empty dir, but hidden from the tree UI.
-            // The directory itself is still rendered so empty folders are visible.
+            // Legacy `.gitkeep` placeholders (if any) stay hidden from the
+            // tree UI; the directory itself is still rendered.
             if (step === '.gitkeep') return;
             cursor[step] = { _type: 'file', filepath: path };
           } else {
@@ -553,6 +564,8 @@ Enjoy evaluating code execution locally inside memory!`,
           }
         });
       });
+      // Explicitly-created empty folders have no VFS keys — render them too.
+      for (const dirPath of emptyDirs) ensureDir(dirPath);
       return rootMap;
     }
 
@@ -580,7 +593,7 @@ Enjoy evaluating code execution locally inside memory!`,
         if (obj._type === 'file') {
           const isActive = obj.filepath === currentFile;
           const div = document.createElement('div');
-          div.className = `flex items-center gap-1.5 py-1 pr-2 rounded-md text-xs font-mono cursor-pointer transition-all ${
+          div.className = `flex items-center gap-0.5 py-1 pr-1 rounded-md text-xs font-mono cursor-pointer transition-all ${
             isActive
               ? 'bg-cyan-950/80 text-cyan-300 font-semibold'
               : 'text-slate-300 hover:bg-slate-800/40 hover:text-white'
@@ -588,7 +601,33 @@ Enjoy evaluating code execution locally inside memory!`,
           div.style.paddingLeft = (depth * 16 + 4) + 'px';
 
           const icon = getFileIcon(obj.filepath, name);
-          div.innerHTML = `<span class="text-[11px] shrink-0 w-4 text-center">${icon}</span><span class="truncate flex-1">${name}</span>`;
+          div.innerHTML = `<span class="text-[11px] shrink-0 w-4 text-center">${icon}</span><span class="truncate flex-1">${escHtml(name)}</span>`;
+
+          // Hover actions: rename + delete (mirrors folder headers)
+          const fileActions = document.createElement('span');
+          fileActions.className = 'hidden items-center gap-0.5 shrink-0';
+
+          const renameFileBtn = document.createElement('button');
+          renameFileBtn.className = 'text-slate-500 hover:text-cyan-400 p-0.5 rounded transition-colors';
+          renameFileBtn.title = 'Rename file ' + name;
+          renameFileBtn.setAttribute('aria-label', 'Rename file ' + name);
+          renameFileBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>';
+          renameFileBtn.addEventListener('click', (e) => { e.stopPropagation(); openRenameFileModal(obj.filepath); });
+
+          const delFileBtn = document.createElement('button');
+          delFileBtn.className = 'text-slate-500 hover:text-rose-400 p-0.5 rounded transition-colors';
+          delFileBtn.title = 'Delete file ' + name;
+          delFileBtn.setAttribute('aria-label', 'Delete file ' + name);
+          delFileBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>';
+          delFileBtn.addEventListener('click', (e) => { e.stopPropagation(); openDeleteFileModal(obj.filepath); });
+
+          fileActions.appendChild(renameFileBtn);
+          fileActions.appendChild(delFileBtn);
+          div.appendChild(fileActions);
+
+          // Hover to reveal actions
+          div.addEventListener('mouseenter', () => { fileActions.classList.remove('hidden'); fileActions.classList.add('flex'); });
+          div.addEventListener('mouseleave', () => { fileActions.classList.add('hidden'); fileActions.classList.remove('flex'); });
 
           div.onclick = (e) => {
             e.stopPropagation();
@@ -612,7 +651,9 @@ Enjoy evaluating code execution locally inside memory!`,
 
         const isExpanded = treeState[dirPath] !== false;
         const childCount = countItems(obj.children);
-        const hasChildren = childCount > 0;
+        // A folder "has children" when it contains files OR subfolders —
+        // an explicitly-created empty subfolder still needs to render.
+        const hasChildren = Object.keys(obj.children).length > 0;
 
         // Header row
         const header = document.createElement('div');
@@ -652,6 +693,7 @@ Enjoy evaluating code execution locally inside memory!`,
         const addFileBtn = document.createElement('button');
         addFileBtn.className = 'text-slate-500 hover:text-cyan-400 p-0.5 rounded transition-colors';
         addFileBtn.title = 'New file in ' + name;
+        addFileBtn.setAttribute('aria-label', 'New file in ' + name);
         addFileBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>';
         addFileBtn.addEventListener('click', (e) => { e.stopPropagation(); openNewFileModal(dirPath); });
 
@@ -662,6 +704,13 @@ Enjoy evaluating code execution locally inside memory!`,
         addDirBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>';
         addDirBtn.addEventListener('click', (e) => { e.stopPropagation(); openNewFolderModal(dirPath); });
 
+        const renameDirBtn = document.createElement('button');
+        renameDirBtn.className = 'text-slate-500 hover:text-cyan-400 p-0.5 rounded transition-colors';
+        renameDirBtn.title = 'Rename folder ' + name;
+        renameDirBtn.setAttribute('aria-label', 'Rename folder ' + name);
+        renameDirBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>';
+        renameDirBtn.addEventListener('click', (e) => { e.stopPropagation(); openRenameFolderModal(dirPath); });
+
         const delDirBtn = document.createElement('button');
         delDirBtn.className = 'text-slate-500 hover:text-rose-400 p-0.5 rounded transition-colors';
         delDirBtn.title = 'Delete folder ' + name;
@@ -671,6 +720,7 @@ Enjoy evaluating code execution locally inside memory!`,
 
         actions.appendChild(addFileBtn);
         actions.appendChild(addDirBtn);
+        actions.appendChild(renameDirBtn);
         actions.appendChild(delDirBtn);
         header.appendChild(actions);
 
@@ -852,12 +902,39 @@ Enjoy evaluating code execution locally inside memory!`,
       }
     }
 
-    function nameInputHTML(label, placeholder) {
+    function nameInputHTML(label, placeholder, value) {
+      const valAttr = value != null && value !== '' ? ' value="' + escHtml(value) + '"' : '';
       return (
         '<label class="block text-[11px] font-medium text-slate-400 mb-1.5" for="modal-name-input">' + escHtml(label) + '</label>' +
-        '<input id="modal-name-input" type="text" placeholder="' + escHtml(placeholder) + '" autocomplete="off" spellcheck="false" ' +
+        '<input id="modal-name-input" type="text" placeholder="' + escHtml(placeholder) + '"' + valAttr + ' autocomplete="off" spellcheck="false" ' +
         'class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 font-mono">'
       );
+    }
+
+    // Last path segment (file or folder name without its parent dirs).
+    function lastSegment(p) {
+      const i = p.lastIndexOf('/');
+      return i === -1 ? p : p.slice(i + 1);
+    }
+
+    // True when a file or folder (real or a tracked empty folder) already
+    // occupies path p. Note: creating a file *inside* a tracked empty
+    // folder is not a conflict — it just fills the folder.
+    function pathExists(p) {
+      if (vfs[p]) return true;
+      if (Object.keys(vfs).some((k) => k === p || k.startsWith(p + '/'))) return true;
+      for (const d of emptyDirs) {
+        if (d === p || d.startsWith(p + '/')) return true;
+      }
+      return false;
+    }
+
+    // A real file just landed at fullPath — any tracked empty folders on
+    // that path are no longer empty.
+    function clearEmptyDirsAlong(fullPath) {
+      for (const d of [...emptyDirs]) {
+        if (fullPath === d || fullPath.startsWith(d + '/')) emptyDirs.delete(d);
+      }
     }
 
     // Wire Enter-to-submit on the modal's name input.
@@ -892,13 +969,14 @@ Enjoy evaluating code execution locally inside memory!`,
             return;
           }
           const fullPath = parentDir ? parentDir + '/' + name : name;
-          if (vfs[fullPath] || Object.keys(vfs).some((k) => k === fullPath || k.startsWith(fullPath + '/'))) {
+          if (pathExists(fullPath)) {
             modalShowError('A file or folder with that name already exists.');
             input.focus();
             input.select();
             return;
           }
           vfs[fullPath] = '';
+          clearEmptyDirsAlong(fullPath);
           expandDir(dirName(fullPath));
           closeModal();
           syncEditorFile(fullPath);
@@ -934,14 +1012,15 @@ Enjoy evaluating code execution locally inside memory!`,
             return;
           }
           const fullPath = parentDir ? parentDir + '/' + name : name;
-          if (vfs[fullPath] || Object.keys(vfs).some((k) => k === fullPath || k.startsWith(fullPath + '/'))) {
+          if (pathExists(fullPath)) {
             modalShowError('A file or folder with that name already exists.');
             input.focus();
             input.select();
             return;
           }
-          // Placeholder so the (virtual) folder appears in the tree.
-          vfs[fullPath + '/.gitkeep'] = '';
+          // Track as an explicitly empty folder — no placeholder files.
+          // buildTreeMap renders it until it gains real files.
+          emptyDirs.add(fullPath);
           expandDir(fullPath);
           treeState[fullPath] = true;
           closeModal();
@@ -973,11 +1052,14 @@ Enjoy evaluating code execution locally inside memory!`,
       const prefix = dirPath + '/';
       const doomed = Object.keys(vfs).filter((k) => k === dirPath || k.startsWith(prefix));
       const visible = doomed.filter((k) => k.split('/').pop() !== '.gitkeep');
+      const fileWord = visible.length === 0
+        ? 'which is empty'
+        : 'and ' + (visible.length === 1 ? 'the 1 file' : 'all ' + visible.length + ' files') + ' inside it';
       openModal({
         title: 'Delete folder?',
         desc:
           'This will permanently delete the folder <code class="text-rose-400 font-mono bg-slate-950 px-1 rounded">' + escHtml(dirPath) + '</code> ' +
-          'and ' + (visible.length === 1 ? 'the 1 file' : 'all ' + visible.length + ' files') + ' inside it. This cannot be undone.',
+          fileWord + '. This cannot be undone.',
         confirmLabel: 'Delete',
         confirmKind: 'danger',
         onConfirm: () => {
@@ -986,6 +1068,9 @@ Enjoy evaluating code execution locally inside memory!`,
             return;
           }
           for (const k of doomed) delete vfs[k];
+          for (const d of [...emptyDirs]) {
+            if (d === dirPath || d.startsWith(prefix)) emptyDirs.delete(d);
+          }
           closeModal();
           if (!vfs[currentFile]) {
             const remaining = Object.keys(vfs)[0];
@@ -995,6 +1080,130 @@ Enjoy evaluating code execution locally inside memory!`,
           log('warn', 'Deleted folder: ' + dirPath + '/ (' + visible.length + ' file(s))');
         },
       });
+    }
+
+    function openRenameFileModal(filepath) {
+      const parent = dirName(filepath);
+      const oldName = lastSegment(filepath);
+      openModal({
+        title: 'Rename file',
+        desc: 'Rename <code class="text-cyan-400 font-mono bg-slate-950 px-1 rounded">' + escHtml(filepath) + '</code>.',
+        bodyHTML: nameInputHTML('New name', oldName, oldName),
+        confirmLabel: 'Rename',
+        confirmKind: 'primary',
+        onConfirm: () => {
+          const input = document.getElementById('modal-name-input');
+          const newName = input.value.trim();
+          if (!newName) {
+            modalShowError('Please enter a name.');
+            input.focus();
+            return;
+          }
+          if (newName.includes('/')) {
+            modalShowError('File names cannot contain slashes.');
+            input.focus();
+            input.select();
+            return;
+          }
+          if (newName === oldName) {
+            closeModal();
+            return;
+          }
+          const newPath = parent ? parent + '/' + newName : newName;
+          if (pathExists(newPath)) {
+            modalShowError('A file or folder with that name already exists.');
+            input.focus();
+            input.select();
+            return;
+          }
+          vfs[newPath] = vfs[filepath];
+          delete vfs[filepath];
+          closeModal();
+          if (currentFile === filepath) {
+            syncEditorFile(newPath);
+          }
+          setupFileTree();
+          log('info', 'Renamed: ' + filepath + ' → ' + newPath);
+        },
+      });
+      submitOnEnter();
+      const input = document.getElementById('modal-name-input');
+      if (input) input.select();
+    }
+
+    function openRenameFolderModal(dirPath) {
+      const parent = dirName(dirPath);
+      const oldName = lastSegment(dirPath);
+      openModal({
+        title: 'Rename folder',
+        desc: 'Rename <code class="text-cyan-400 font-mono bg-slate-950 px-1 rounded">' + escHtml(dirPath) + '</code>. Every file inside moves with it.',
+        bodyHTML: nameInputHTML('New name', oldName, oldName),
+        confirmLabel: 'Rename',
+        confirmKind: 'primary',
+        onConfirm: () => {
+          const input = document.getElementById('modal-name-input');
+          const newName = input.value.trim();
+          if (!newName) {
+            modalShowError('Please enter a name.');
+            input.focus();
+            return;
+          }
+          if (newName.includes('/')) {
+            modalShowError('Folder names cannot contain slashes.');
+            input.focus();
+            input.select();
+            return;
+          }
+          if (newName === oldName) {
+            closeModal();
+            return;
+          }
+          const newPath = parent ? parent + '/' + newName : newName;
+          if (pathExists(newPath)) {
+            modalShowError('A file or folder with that name already exists.');
+            input.focus();
+            input.select();
+            return;
+          }
+          const oldPrefix = dirPath + '/';
+          const newPrefix = newPath + '/';
+          const moved = [];
+          for (const k of Object.keys(vfs)) {
+            if (k === dirPath || k.startsWith(oldPrefix)) {
+              moved.push([k, vfs[k]]);
+            }
+          }
+          for (const [k] of moved) delete vfs[k];
+          for (const [k, v] of moved) {
+            vfs[k === dirPath ? newPath : newPrefix + k.slice(oldPrefix.length)] = v;
+          }
+          // Migrate expansion state so the renamed folder stays open.
+          for (const k of Object.keys(treeState)) {
+            if (k === dirPath || k.startsWith(oldPrefix)) {
+              treeState[k === dirPath ? newPath : newPrefix + k.slice(oldPrefix.length)] = treeState[k];
+              delete treeState[k];
+            }
+          }
+          // Migrate tracked empty folders.
+          for (const d of [...emptyDirs]) {
+            if (d === dirPath || d.startsWith(oldPrefix)) {
+              emptyDirs.delete(d);
+              emptyDirs.add(d === dirPath ? newPath : newPrefix + d.slice(oldPrefix.length));
+            }
+          }
+          expandDir(dirName(newPath));
+          treeState[newPath] = true;
+          closeModal();
+          if (currentFile === dirPath || currentFile.startsWith(oldPrefix)) {
+            syncEditorFile(currentFile === dirPath ? newPath : newPrefix + currentFile.slice(oldPrefix.length));
+          }
+          setupFileTree();
+          log('info', 'Renamed folder: ' + dirPath + '/ → ' + newPath + '/');
+        },
+      });
+      submitOnEnter();
+      const input = document.getElementById('modal-name-input');
+      if (input) input.select();
     }
 
     // -------------------------------------------------------------
@@ -1239,11 +1448,13 @@ console.log(pages)
     // File Manipulation Controls
     // -------------------------------------------------------------
     document.getElementById('btn-add-file').addEventListener('click', () => {
-      openNewFileModal('');
+      // Create inside the folder of the currently viewed file ('' = root).
+      openNewFileModal(dirName(currentFile));
     });
 
     document.getElementById('btn-add-folder').addEventListener('click', () => {
-      openNewFolderModal('');
+      // Create inside the folder of the currently viewed file ('' = root).
+      openNewFolderModal(dirName(currentFile));
     });
 
     document.getElementById('btn-delete-file').addEventListener('click', () => {
