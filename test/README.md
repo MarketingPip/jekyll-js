@@ -35,7 +35,11 @@ Suite layout (run everything with `npm test` from the repo root):
   renders identically to `{% include %}`),
   `no-frontmatter.test.js` (`.md` without front matter is a static file,
   not a page — matches Jekyll's reader.rb), and `nested-layouts.test.js`
-  (layout chains — a layout with its own `layout:` front matter renders inside-out).
+  (layout chains — a layout with its own `layout:` front matter renders inside-out),
+  and `filter-semantics.test.js` (Liquid filter parity vs Ruby:
+  `group_by` nil-key stringification, `uniq` flattening, `split: " "`,
+  `escape(nil)`, `xml_escape` entities, `where` comparison semantics —
+  all oracle-grounded against jekyll 4.4.1 + liquid 4.0.4).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,

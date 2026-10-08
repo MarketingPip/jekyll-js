@@ -535,7 +535,10 @@ function registerFilterFixes(engine) {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+      // FIX: Jekyll emits &apos; (Ruby: input.to_s.encode(:xml => :attr)),
+      // not LiquidJS's &#39;. Verified against oracle:
+      //   'a&b<c>d"e\'f' | xml_escape -> "a&amp;b&lt;c&gt;d&quot;e&apos;f"
+      .replace(/'/g, '&apos;');
   });
 
   engine.registerFilter('smartify', (input) => {
@@ -552,6 +555,123 @@ function registerFilterFixes(engine) {
     if (input == null) return '';
     return String(input).replace(/\s+/g, ' ').trim();
   });
+
+  // FIX: Ruby's grouping_filters.rb stringifies group keys:
+  //   input.group_by { |item| item_property(item, property).to_s }
+  // so items with a missing/nil key group under "" (and each group carries
+  // name/items/size). LiquidJS left the key undefined, which made
+  // `where_exp: "g.name == ''"` match nothing -- just-the-docs' entire
+  // sidebar nav rendered empty. Verified against oracle:
+  //   group_by: "parent" -> [{"name"=>"","items"=>[a,c],"size"=>2}, ...]
+  // NOTE: group_by_exp is intentionally NOT overridden -- Ruby does not
+  // stringify keys there either (parsed_expr.render(@context) raw).
+  engine.registerFilter('group_by', function (arr, property) {
+    if (arr == null) return [];
+    if (!Array.isArray(arr)) return arr; // Ruby: non-groupable input passes through
+    const groups = new Map();
+    for (const item of arr) {
+      const key = liquidProp(this.context, item, property);
+      const name = key == null ? '' : String(key);
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(item);
+    }
+    return [...groups.entries()].map(([name, items]) => ({ name, items, size: items.length }));
+  });
+
+  // FIX: Ruby Liquid's uniq flattens nested arrays first (InputIterator:
+  // input.flatten -- deep -- then uniq). LiquidJS deduped the raw array, so
+  // [[1,2],[2,3],1] stayed 3 elements. Verified against oracle:
+  //   [[1,2],[2,3],1,[1]] | uniq -> [1,2,3]
+  engine.registerFilter('uniq', (arr) => {
+    const list = arr == null ? [] : Array.isArray(arr) ? arr.flat(Infinity) : [arr];
+    return [...new Set(list)];
+  });
+
+  // FIX: Ruby's String#split(" ") splits on whitespace RUNS and strips
+  // leading whitespace (" a  b ".split(" ") -> ["a","b"]). LiquidJS split on
+  // the literal single space (" a  b " -> ["","a","","b",""]). Other
+  // separators keep Ruby's trailing-empty-field drop (as LiquidJS did).
+  engine.registerFilter('split', (input, separator) => {
+    const str = input == null ? '' : String(input);
+    if (separator === ' ') {
+      const trimmed = str.trim();
+      return trimmed === '' ? [] : trimmed.split(/\s+/);
+    }
+    const parts = str.split(separator == null ? undefined : String(separator));
+    while (parts.length && parts[parts.length - 1] === '') parts.pop();
+    return parts;
+  });
+
+  // FIX: Ruby Liquid's escape returns nil for nil input (falsy downstream);
+  // LiquidJS stringified it to "" (truthy). Entity map matches CGI.escapeHTML
+  // (& < > " ', with ' -> &#39;). Verified against oracle:
+  //   {% if x | escape %} -> false ; 'a<b>&"c\'d' -> "a&lt;b&gt;&amp;&quot;c&#39;d"
+  engine.registerFilter('escape', (input) => {
+    if (input == null) return input;
+    return String(input)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  });
+
+  // FIX: Jekyll's `where` (compare_property_vs_target, filters.rb) does NOT
+  // use plain ==: it stringifies the target and compares per element, so
+  // `where: "val", 0` matches 0 AND "0", `where: "val", false` matches false
+  // AND "false", nil matches only nil, and an Array/Hash target returns the
+  // input unchanged. LiquidJS used strict equals, so "0"/"false" never
+  // matched. Verified against oracle (jekyll 4.4.1 + liquid 4.0.4).
+  // Deliberate divergence: Ruby raises ArgumentError for a missing value
+  // ("Liquid error: wrong number of arguments"); we treat it like an
+  // explicit nil instead of failing the build.
+  engine.registerFilter('where', function (arr, property, expected) {
+    if (!Array.isArray(arr)) return arr;
+    const kind = dropKind(expected);
+    if (expected === undefined || kind === 'NullDrop') {
+      return arr.filter((item) => liquidProp(this.context, item, property) == null);
+    }
+    if (kind === 'EmptyDrop' || kind === 'BlankDrop') {
+      // Ruby: target.to_s == ""; match iff property == "" or Array(property).join == ""
+      return arr.filter((item) => {
+        const v = liquidProp(this.context, item, property);
+        const list = v == null ? [] : Array.isArray(v) ? v : [v];
+        return list.join('') === '';
+      });
+    }
+    if (Array.isArray(expected) || isPlainObject(expected)) return arr;
+    const target = String(expected);
+    return arr.filter((item) => {
+      const v = liquidProp(this.context, item, property);
+      if (typeof v === 'string') return v === target;
+      const list = v == null ? [] : Array.isArray(v) ? v : [v];
+      return list.some((p) => String(p) === target);
+    });
+  });
+}
+
+// ─── filter-fix helpers ─────────────────────────────────────────────────────
+// Resolve a dotted property path the way Jekyll's `item_property` does
+// (read_liquid_attribute splits on "."), but through LiquidJS's own lookup so
+// Drop-based documents (liquidMethodMissing) keep working. `this` in a
+// registered filter is { context, token, liquid } (see liquidjs Filter#render).
+function liquidProp(context, item, property) {
+  if (property == null) return undefined;
+  return context.spawn(item).get(String(property).split('.'));
+}
+
+// LiquidJS does not export its Drop subclasses; identify the nil/empty/blank
+// literals by constructor name (present in the shipped dist bundle).
+function dropKind(v) {
+  if (v !== null && typeof v === 'object' && v.constructor) {
+    const n = v.constructor.name;
+    if (n === 'NullDrop' || n === 'EmptyDrop' || n === 'BlankDrop') return n;
+  }
+  return null;
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v) && dropKind(v) === null;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
