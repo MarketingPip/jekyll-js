@@ -39,7 +39,9 @@ Suite layout (run everything with `npm test` from the repo root):
   and `filter-semantics.test.js` (Liquid filter parity vs Ruby:
   `group_by` nil-key stringification, `uniq` flattening, `split: " "`,
   `escape(nil)`, `xml_escape` entities, `where` comparison semantics —
-  all oracle-grounded against jekyll 4.4.1 + liquid 4.0.4).
+  all oracle-grounded against jekyll 4.4.1 + liquid 4.0.4),
+  and `scss-liquid.test.js` (Liquid rendered in `.scss` before Sass compiles —
+  `{{ site.* }}`, `{% if %}`/`{% assign %}`, plus @import regression).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,

@@ -52,6 +52,13 @@ export function isSassAsset(path, content) {
  * @param {Object} sass - the Sass compiler implementation (dart-sass). Required:
  *   pass `import * as sass from 'sass'` (Node) or load `dist/sass-plugin.js`
  *   (browser, sets `window.JekyllSass`).
+ *
+ * NOTE (liquid ordering): real Jekyll renders Liquid in .scss/.sass files
+ * BEFORE Sass compilation (lib/jekyll/renderer.rb: Renderer#run renders
+ * Liquid first, then runs converters). The caller (engine.js build())
+ * Liquid-renders the stripped body before calling this; `content` here
+ * should therefore already be Liquid-rendered. Partials pulled in via
+ * @import are NOT Liquid-rendered -- same as real Jekyll.
  * @returns {{ css: string, permalink: string }}
  */
 export function compileSassAsset(path, content, vfs, config = {}, sass) {
