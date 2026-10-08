@@ -1137,6 +1137,22 @@ export class JekyllEngine {
         continue;
       }
 
+      // FIX (robots.txt not emitted): real Jekyll's reader (reader.rb
+      // read_directories) turns ANY file carrying a YAML front matter block
+      // into a convertible Page, regardless of extension. Previously only
+      // .md/.markdown/.html/.liquid were checked, so theme files like
+      // chirpy's assets/robots.txt (front matter + `permalink: /robots.txt`)
+      // fell through to _staticFiles -- and build() never emitted them.
+      // .scss/.sass stay claimed by the Sass pipeline above. _sass/ is
+      // never page-able either (Sass partials land, like real Jekyll) --
+      // it keeps its pre-existing static-file classification.
+      const hasFrontMatter = content.startsWith('---\n') || content.startsWith('---\r\n');
+      const inSassDir = path === '_sass' || path.startsWith('_sass/') || path.includes('/_sass/');
+      if (hasFrontMatter && !inSassDir) {
+        this._rootPages.push({ path, content });
+        continue;
+      }
+
       if (!/\.(md|markdown|html|htm|liquid)$/i.test(path)) {
         const slashIdx = path.lastIndexOf('/');
         const name = slashIdx === -1 ? path : path.slice(slashIdx + 1);

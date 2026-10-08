@@ -57,6 +57,52 @@ export const SITEMAP_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 /**
+ * Sort comparator mirroring Jekyll's Document#<=> (document.rb): date
+ * ascending, then relative-path tie-break. A doc with no resolvable date
+ * compares equal on the date step (real Jekyll falls back to site.time for
+ * all of them), so the path decides -- exactly like Ruby's
+ * `data["date"] <=> other.data["date"]` returning nil and falling through
+ * to the path comparison.
+ */
+function compareDocsByDateThenPath(dateOf) {
+  return (a, b) => {
+    const ta = dateOf(a);
+    const tb = dateOf(b);
+    if (ta !== null && tb !== null && ta !== tb) return ta - tb;
+    const pa = a.path || '';
+    const pb = b.path || '';
+    return pa < pb ? -1 : pa > pb ? 1 : 0;
+  };
+}
+
+const toTime = (v) => (v == null ? null : new Date(v).getTime());
+
+// Posts: _date is exactly front-matter `date:` || filename date (no
+// scan-time fallback is ever applied to posts) -- i.e. Jekyll's Document#date.
+const comparePosts = compareDocsByDateThenPath((p) => toTime(p._date));
+
+// Collection docs: mirror Document#date's front-matter -> filename fallback.
+// _date carries an extra `new Date()` scan-time fallback which must NOT
+// participate in ordering (real Jekyll falls back to site.time for ALL
+// undated docs, i.e. they compare equal and the path tie-break decides).
+function docFilenameDate(relPath) {
+  const base = (relPath || '').split('/').pop() || '';
+  const m = base.match(/^(\d{4})-(\d{1,2})-(\d{1,2})-/);
+  return m ? new Date(`${m[1]}-${m[2]}-${m[3]}`) : null;
+}
+const compareDocs = compareDocsByDateThenPath(
+  (d) => toTime(d.date ?? docFilenameDate(d._relPath || d.path))
+);
+
+// Real Jekyll: `site.pages.sort_by!(&:name)` (reader.rb #sort_files!) --
+// pages iterate sorted by basename, not full path.
+function comparePagesByName(a, b) {
+  const na = (a.path || '').split('/').pop() || '';
+  const nb = (b.path || '').split('/').pop() || '';
+  return na < nb ? -1 : na > nb ? 1 : 0;
+}
+
+/**
  * Generate /sitemap.xml using the real gem's template.
  * @param {JekyllEngine} engine
  * @returns {Promise<{path, permalink, data, content}>}
@@ -68,32 +114,51 @@ export async function generateSitemap(engine) {
   // output != false), then site.html_pages, then page.static_files.
   // We provide these in the expected shape.
 
-  // Build collections array. Posts come first (real Jekyll orders them so).
+  // FIX (sitemap ordering parity): real Jekyll builds site.collections from
+  // the config `collections:` keys IN ORDER, and `posts` is lazily appended
+  // at the END via `collections["posts"] ||= Collection.new(self, "posts")`
+  // (site.rb) -- unless the user listed posts in `collections:` themselves.
+  // Within a collection, docs iterate in Document#<=> order (date ascending,
+  // path tie-break), so posts are OLDEST-first here even though the
+  // `site.posts` Liquid drop sorts newest-first.
+  const collConfig = engine._collectionsConfig || {};
   const collections = [];
-  const postsColl = (engine._collections?.posts || []).map((p) => ({
-    url: p._permalink,
-    date: p._date,
-    sitemap: p.sitemap,
-    last_modified_at: p.last_modified_at,
-  }));
-  // Real Jekyll always has a posts collection entry
-  collections.push({ docs: postsColl, output: true });
-
-  // Other output:true collections
-  for (const [name, docs] of Object.entries(engine._collections || {})) {
-    if (name === 'posts') continue;
-    const collConfig = engine._config?.collections?.[name];
-    if (collConfig?.output !== true) continue;
-    collections.push({
-      docs: (docs || []).map((d) => ({
+  const added = new Set();
+  const pushCollection = (name) => {
+    if (added.has(name)) return;
+    added.add(name);
+    const docs = engine._collections?.[name] || [];
+    if (name === 'posts') {
+      // Real Jekyll always exposes the posts collection with output=true.
+      const postsColl = [...docs]
+        .sort(comparePosts)
+        .map((p) => ({
+          url: p._permalink,
+          date: p._date,
+          sitemap: p.sitemap,
+          last_modified_at: p.last_modified_at,
+        }));
+      collections.push({ docs: postsColl, output: true });
+      return;
+    }
+    const cfg = collConfig[name];
+    const collDocs = [...docs]
+      .sort(compareDocs)
+      .map((d) => ({
         url: d._permalink || d.url,
         date: d._date || d.date,
         sitemap: d.sitemap,
         last_modified_at: d.last_modified_at,
-      })),
-      output: true,
-    });
-  }
+      }));
+    collections.push({ docs: collDocs, output: cfg?.output === true });
+  };
+  for (const name of Object.keys(collConfig)) pushCollection(name);
+  pushCollection('posts');
+
+  // FIX (sitemap ordering parity): site.html_pages is the html-filtered page
+  // list (the old code passed ALL pages, leaking e.g. /robots.txt into the
+  // sitemap), sorted by basename like `site.pages.sort_by!(&:name)`.
+  const htmlPages = [...(siteCtx.html_pages || [])].sort(comparePagesByName);
 
   const html = await engine.liquidEngine.parseAndRender(
     // FIX (oracle-found): real jekyll-sitemap minifies the template with
@@ -104,7 +169,7 @@ export async function generateSitemap(engine) {
       site: {
         ...siteCtx,
         collections,
-        html_pages: siteCtx.pages || [],
+        html_pages: htmlPages,
       },
       page: {
         static_files: [],

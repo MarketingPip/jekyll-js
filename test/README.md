@@ -35,7 +35,10 @@ Suite layout (run everything with `npm test` from the repo root):
   renders identically to `{% include %}`),
   `no-frontmatter.test.js` (`.md` without front matter is a static file,
   not a page — matches Jekyll's reader.rb), and `nested-layouts.test.js`
-  (layout chains — a layout with its own `layout:` front matter renders inside-out).
+  (layout chains — a layout with its own `layout:` front matter renders inside-out),
+  and `sitemap-robots.test.js` (jekyll-sitemap emission order: config-order
+  collections before posts, date-ascending docs, basename-sorted pages;
+  `robots.txt` with front matter renders as a page, like the real gem).
 - **integration/** — full `JekyllEngine.build()` runs:
   `integration.test.js` (build against the `defaultVFS` fixture) and
   `battletest.test.js` (build of the real minima theme + scaffolded site,
