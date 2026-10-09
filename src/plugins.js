@@ -107,9 +107,10 @@ export const BUILTIN_ADAPTERS = {
     'marked': () => import('./adapters/markdown-marked.js'),
   },
   highlighter: {
-    'rouge': () => {
-      throw new Error('[jekyll-js] Rouge is not supported. Use highlight.js or shiki: highlighter: hljs');
-    },
+    'rouge': () => import('./adapters/highlight-rouge.js').then(m => {
+      console.warn('[jekyll-js] highlighter: rouge is deprecated. Consider highlight.js or shiki.');
+      return m.default;
+    }),
     'highlight.js': () => import('./adapters/highlight-hljs.js'),
     'hljs': () => import('./adapters/highlight-hljs.js'),
     'shiki': () => import('./adapters/highlight-shiki.js'),
