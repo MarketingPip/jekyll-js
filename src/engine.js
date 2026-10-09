@@ -801,6 +801,21 @@ export class JekyllEngine {
       // FIX (#6 -- no inline `markdownify` filter existed, only the
       // page-level .md -> HTML conversion step):
       markdownify: (input) => this._renderMarkdown(input),
+      // FIX (oracle-found): Ruby's divided_by does integer division when
+      // both operands are integers. LiquidJS does float division.
+      // e.g. 5 | divided_by: 2 → 2 (Ruby), 2.5 (LiquidJS)
+      divided_by: (input, divisor) => {
+        const a = Number(input);
+        const b = Number(divisor);
+        if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) {
+          return this.liquidEngine.filters.divided_by(input, divisor);
+        }
+        // Ruby: integer division if both are integers
+        if (Number.isInteger(a) && Number.isInteger(b)) {
+          return Math.floor(a / b);
+        }
+        return a / b;
+      },
       // FIX (oracle-found): LiquidJS's date_to_xmlschema outputs UTC
       // (+00:00) for Date objects accessed via property (e.g., post.date).
       // Real Jekyll outputs local offset (-05:00). Override to ensure

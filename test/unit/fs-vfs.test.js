@@ -62,10 +62,13 @@ describe('readDirToVFS', () => {
     expect(() => readDirToVFS('   ', { fs })).toThrow(/non-empty path/);
   });
 
-  test('binary files get a placeholder (engine only needs them to exist)', () => {
+  test('binary files are read as Buffer for passthrough', () => {
     const dir = makeTempSite({ 'index.md': 'x', 'assets/logo.png': 'fake-bytes' });
     const vfs = readDirToVFS(dir, { fs });
-    expect(vfs['assets/logo.png']).toBe('');
+    // Binary files are stored as Buffer (not empty string) so the engine
+    // can pass through the raw bytes.
+    expect(Buffer.isBuffer(vfs['assets/logo.png'])).toBe(true);
+    expect(vfs['assets/logo.png'].toString()).toBe('fake-bytes');
   });
 
   test('extensionless files are read as text, not mistaken for binary', () => {

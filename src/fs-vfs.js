@@ -78,7 +78,11 @@ export function readDirToVFS(dir, options = {}) {
         // Non-directories are read (symlinks followed), as before.
         const dot = entry.name.lastIndexOf('.');
         const ext = dot === -1 ? '' : entry.name.slice(dot + 1).toLowerCase();
-        vfs[rel] = BINARY_EXT.has(ext) ? '' : fs.readFileSync(full, 'utf8');
+        // Binary files: store raw bytes (Buffer) for passthrough.
+        // The engine emits them unchanged.
+        vfs[rel] = BINARY_EXT.has(ext)
+          ? fs.readFileSync(full)  // Buffer, not utf8 string
+          : fs.readFileSync(full, 'utf8');
       }
     }
   };
