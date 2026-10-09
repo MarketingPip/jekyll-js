@@ -17,6 +17,17 @@ AI agents that need to render Jekyll anywhere.
 ```text
 src/
   engine.js            JekyllEngine — build(), VFS ingestion, site context
+  plugins.js           Plugin interfaces: MarkdownRenderer, Highlighter, SassCompiler, SitePlugin
+  jekyllCompat.js      Jekyll _config.yml compatibility layer (auto-detects markdown/highlighter)
+  core.js              Tree-shakeable entry: build only (~300KB)
+  liquid-only.js       Tree-shakeable entry: just templates (~100KB)
+  full.js              Tree-shakeable entry: everything, lazy adapters (~500KB)
+  worker.js            Tree-shakeable entry: Web Worker wrapper
+  adapters/
+    markdown-marked.js    Default marked adapter
+    markdown-kramdown.js  kramdown-js adapter (172/177 oracle parity)
+    highlight-hljs.js     highlight.js with lazy language loading
+    highlight-rouge.js    Rouge 4.7.0 compat (70/70 byte-exact)
   jekyllTags.js        LiquidJS tag registrations (highlight, link, post_url, seo, feed_meta)
   jekyllFeed.js        Native jekyll-feed 0.17.0 (byte-identical to gem)
   jekyllSitemap.js     Native jekyll-sitemap 1.4.0 (byte-identical to gem)
@@ -94,6 +105,11 @@ before calling date-related work done. CI runs Node 20 + 22.
 
 ## Key decisions (do not re-litigate without new evidence)
 
+- **Plugin architecture over hardcoded deps:** Markdown renderers, highlighters,
+  and Sass compilers are plugins (see `src/plugins.js`). Engine accepts
+  `options.markdown` (a `MarkdownRenderer` adapter). Defaults to built-in
+  marked adapter; kramdown-js available as `src/adapters/markdown-kramdown.js`.
+  Never hardcode a specific renderer/highlighter in core.
 - **LiquidJS config is frozen:** `dynamicPartials: false`,
   `jekyllInclude: true`, `jekyllWhere: true`. Required for parity.
 - **Layouts resolve without extension** (`layout: post`), order: exact →
@@ -143,3 +159,34 @@ See: https://docusaurus.io/docs/versioning#when-to-version
 
 `docs/parity.md` — the honest scoreboard. Check it before claiming
 something "isn't implemented."
+
+## kramdown-js integration
+
+The `markdown-kramdown` adapter (`src/adapters/markdown-kramdown.js`) wraps
+the [kramdown-js](../kramdown-js/) repo (172/177 oracle parity). Usage:
+
+```js
+import { JekyllEngine } from 'jekyll-js/core';
+import kramdownAdapter from 'jekyll-js/adapters/markdown-kramdown';
+
+const engine = new JekyllEngine({
+  vfs,
+  markdown: kramdownAdapter,
+});
+```
+
+**Do NOT** import kramdown-js directly in core. It lives in a separate repo
+(`~/workspace/kramdown-js/`) and is a plugin, not a dependency.
+
+See [kramdown-js AGENTS.md](../kramdown-js/AGENTS.md) for the parser details.
+
+## Theme parity testing
+
+Five real Jekyll themes are byte-compared in `~/workspace/theme-verify/`:
+hyde, beautiful-jekyll, just-the-docs, minimal-mistakes, chirpy.
+
+Each has `REPORT.md` with before/after scores and difference classification.
+The remaining gaps are structural (not markdown) — see the reports.
+
+To re-run: build each theme with real Jekyll 4.3.4 and with jekyll-js,
+then byte-compare outputs. Use the kramdown adapter for markdown parity.
