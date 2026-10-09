@@ -133,6 +133,35 @@ function stripIndex(input) {
   return String(input).replace(/\/index\.html?$/, '/');
 }
 
+// FIX (Bug 2 -- permalink edge cases): mirrors Jekyll's Page#destination /
+// Document#destination (lib/jekyll/page.rb): a URL ending in "/" is
+// written to `index.html` inside that directory
+// (`File.join(path, "index")` + output_ext). The URL itself is unchanged --
+// only the output file path expands, e.g. `/about/` -> `about/index.html`
+// while the page URL stays `/about/`.
+function permalinkToOutputPath(permalink) {
+  const rel = String(permalink).replace(/^\/+/, '');
+  return rel === '' || rel.endsWith('/') ? `${rel}index.html` : rel;
+}
+
+// FIX (Bug 3 -- page permalink placeholders emitted verbatim): Jekyll's
+// Page#url (lib/jekyll/page.rb) passes a front-matter `permalink:`
+// through the URL class with the page's url_placeholders -- :path (the
+// page's dir, e.g. `/docs`), :basename and :output_ext are substituted;
+// any other token is left as-is (URL#generate_url_from_hash only
+// replaces the known placeholder keys).
+function substitutePagePermalinkPlaceholders(permalink, vfsPath) {
+  const ext = vfsPath.match(/\.[^/.]+$/)?.[0] || '.html';
+  const outputExt = ['.md', '.markdown'].includes(ext) ? '.html' : ext;
+  const lastSlash = vfsPath.lastIndexOf('/');
+  const dir = lastSlash === -1 ? '/' : `/${vfsPath.slice(0, lastSlash)}`;
+  const basename = (lastSlash === -1 ? vfsPath : vfsPath.slice(lastSlash + 1)).replace(/\.[^/.]+$/, '');
+  return String(permalink)
+    .replace(/:path/g, dir)
+    .replace(/:basename/g, basename)
+    .replace(/:output_ext/g, outputExt);
+}
+
 // High fidelity browser-native Markdown Parser using "marked"
 // (Approximate parity with kramdown -- see PARITY notes in FIXES.md)
 //
@@ -289,12 +318,23 @@ function parsePostFilename(filename) {
   return { date: `${year}-${mm}-${dd}`, slug: slug.replace(/-/g, ' ') };
 }
 
-function generatePermalink(frontMatter, slug, date, config = {}) {
-  if (frontMatter.permalink) return frontMatter.permalink;
-
+function generatePermalink(frontMatter, slug, date, config = {}, relPath = '') {
   // Jekyll supports both `permalink:` and (deprecated) `permalink_style:`
   // in _config.yml. Front-matter `permalink_style:` also works per-document.
-  let pattern = frontMatter.permalink_style || config.permalink || config.permalink_style || 'date';
+  //
+  // FIX (front-matter permalink placeholders emitted verbatim): Jekyll's
+  // URL class (lib/jekyll/url.rb #generated_permalink) runs the SAME
+  // placeholder substitution over a front-matter `permalink:` as over a
+  // template -- it is NOT returned verbatim. So the front-matter value is
+  // used as the pattern directly (it is a literal URL template, never a
+  // style-preset name like "pretty", which must NOT be preset-expanded).
+  const fmPermalink = frontMatter.permalink;
+  let pattern;
+  if (fmPermalink) {
+    pattern = String(fmPermalink);
+  } else {
+    pattern = frontMatter.permalink_style || config.permalink || config.permalink_style || 'date';
+  }
 
   const presets = {
     date: '/:categories/:year/:month/:day/:title.html',
@@ -303,7 +343,7 @@ function generatePermalink(frontMatter, slug, date, config = {}) {
     ordinal: '/:categories/:year/:y_day/:title.html',
   };
 
-  if (presets[pattern]) {
+  if (!fmPermalink && presets[pattern]) {
     pattern = presets[pattern];
   }
 
@@ -320,6 +360,16 @@ function generatePermalink(frontMatter, slug, date, config = {}) {
   // Day of year for :y_day (ordinal permalink style). Jan 1 = 001.
   const startOfYear = Date.UTC(year, 0, 1);
   const yDay = String(Math.floor((parsedDate.getTime() - startOfYear) / 86400000) + 1).padStart(3, '0');
+  // FIX (front-matter permalink placeholders): Jekyll's UrlDrop
+  // (lib/jekyll/drops/url_drop.rb) exposes the full date-component set.
+  // :i_month/:i_day are the unpadded variants (%-m / %-d), :short_year is
+  // the 2-digit year (%y). UTC getters, same as :year/:month/:day above.
+  const shortYear = String(year).padStart(4, '0').slice(-2);
+  const iMonth = String(parsedDate.getUTCMonth() + 1);
+  const iDay = String(parsedDate.getUTCDate());
+  const hour = String(parsedDate.getUTCHours()).padStart(2, '0');
+  const minute = String(parsedDate.getUTCMinutes()).padStart(2, '0');
+  const second = String(parsedDate.getUTCSeconds()).padStart(2, '0');
 
   // FIX (#4 in review -- :title permalink placeholder precedence):
   // Jekyll's docs define `:title` as "the slugified title from the
@@ -345,14 +395,35 @@ function generatePermalink(frontMatter, slug, date, config = {}) {
     ].join('/');
   }
 
+  // FIX (:path permalink placeholder): Jekyll's Document#cleaned_relative_path
+  // is the path relative to the collection directory, without extension
+  // (e.g. `_posts/2026-01-02-hello-world.md` -> `2026-01-02-hello-world`).
+  // :name is the slugified basename (UrlDrop#name).
+  const relStr = String(relPath || '');
+  const cleanedPath = relStr ? relStr.replace(/^_[^/]+\//, '').replace(/\.[^/.]+$/, '') : '';
+  const baseName = relStr
+    ? relStr.slice(relStr.lastIndexOf('/') + 1).replace(/\.[^/.]+$/, '')
+    : '';
+
   let path = pattern
     .replace(/:categories/g, categoriesStr)
     .replace(/:year/g, year)
+    .replace(/:short_year/g, shortYear)
     .replace(/:month/g, month)
+    .replace(/:i_month/g, iMonth)
     .replace(/:day/g, day)
+    .replace(/:i_day/g, iDay)
     .replace(/:y_day/g, yDay)
+    .replace(/:hour/g, hour)
+    .replace(/:minute/g, minute)
+    .replace(/:second/g, second)
     .replace(/:title/g, s)
-    .replace(/:slug/g, slugify(slug || ''));
+    // FIX (Bug 3 -- :slug precedence): Jekyll's UrlDrop#slug is
+    // slugified front-matter `slug:` else the basename.
+    .replace(/:slug/g, slugify(frontMatter.slug || slug || ''))
+    .replace(/:name/g, slugify(baseName || slug || ''))
+    .replace(/:path/g, cleanedPath)
+    .replace(/:output_ext/g, '.html');
 
   path = path.replace(/\/+/g, '/');
   if (!path.startsWith('/')) {
@@ -381,23 +452,63 @@ function normalizeCollectionsConfig(collections) {
 // components, unlike posts). `:path` preserves any subdirectory
 // structure within the collection (e.g. `_projects/web/widget.md` ->
 // `web/widget`), each segment slugified.
-function generateCollectionPermalink(frontMatter, collectionName, relPath, collectionConfig = {}) {
-  if (frontMatter.permalink) return frontMatter.permalink;
-
-  const pattern = frontMatter.permalink_style || collectionConfig.permalink || '/:collection/:path/';
+function generateCollectionPermalink(frontMatter, collectionName, relPath, collectionConfig = {}, date = null) {
+  // FIX (front-matter permalink placeholders emitted verbatim): same as
+  // posts -- Jekyll's URL class (lib/jekyll/url.rb #generated_permalink)
+  // substitutes the document's placeholders into a front-matter
+  // `permalink:`, using the collection doc's UrlDrop
+  // (lib/jekyll/drops/url_drop.rb). Never returned verbatim.
+  const fmPermalink = frontMatter.permalink;
+  const pattern =
+    (fmPermalink && String(fmPermalink)) ||
+    frontMatter.permalink_style ||
+    collectionConfig.permalink ||
+    '/:collection/:path/';
 
   const lastSlash = relPath.lastIndexOf('/');
   const dir = lastSlash === -1 ? '' : relPath.slice(0, lastSlash);
   const base = (lastSlash === -1 ? relPath : relPath.slice(lastSlash + 1)).replace(/\.[^/.]+$/, '');
   const pathSlug = [dir, slugify(base)].filter(Boolean).join('/');
 
+  // Date placeholders (UrlDrop#year etc.). Jekyll's Document#date falls
+  // back to site.time; here the caller passes the resolved doc date and
+  // we fall back to now, with UTC getters like generatePermalink.
+  const parsedDate = date ? new Date(date) : new Date();
+  const validDate = isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  const year = validDate.getUTCFullYear();
+  const month = String(validDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(validDate.getUTCDate()).padStart(2, '0');
+
+  let categoriesStr = '';
+  if (frontMatter.categories) {
+    const cats = Array.isArray(frontMatter.categories)
+      ? frontMatter.categories
+      : String(frontMatter.categories).split(/\s+/);
+    categoriesStr = [...new Set(cats.map((c) => String(c).toLowerCase()).filter(Boolean))].join('/');
+  }
+
+  const srcExt = relPath.match(/\.[^/.]+$/)?.[0] || '';
+  const outputExt = ['.md', '.markdown'].includes(srcExt) ? '.html' : srcExt || '.html';
+
   let path = pattern
     .replace(/:collection/g, collectionName)
+    .replace(/:categories/g, categoriesStr)
     .replace(/:path/g, pathSlug)
     .replace(/:name/g, slugify(base))
+    .replace(/:slug/g, slugify(frontMatter.slug || base))
     // FIX (:title used the filename, not the slug): real Jekyll's
     // UrlDrop#title is slugified front-matter `slug:` else the basename.
-    .replace(/:title/g, slugify(frontMatter.slug || base));
+    .replace(/:title/g, slugify(frontMatter.slug || base))
+    .replace(/:year/g, year)
+    .replace(/:short_year/g, String(year).padStart(4, '0').slice(-2))
+    .replace(/:month/g, month)
+    .replace(/:i_month/g, String(validDate.getUTCMonth() + 1))
+    .replace(/:day/g, day)
+    .replace(/:i_day/g, String(validDate.getUTCDate()))
+    .replace(/:hour/g, String(validDate.getUTCHours()).padStart(2, '0'))
+    .replace(/:minute/g, String(validDate.getUTCMinutes()).padStart(2, '0'))
+    .replace(/:second/g, String(validDate.getUTCSeconds()).padStart(2, '0'))
+    .replace(/:output_ext/g, outputExt);
 
   path = path.replace(/\/+/g, '/');
   if (!path.startsWith('/')) path = '/' + path;
@@ -525,6 +636,9 @@ export class JekyllEngine {
     this._staticFiles = [];
     this._sassAssets = [];
     this.vfsTemplates = {};
+    // A fresh scan invalidates the build-time rendered-content cache
+    // (see _precomputeDocumentContent) -- entries are rebuilt below.
+    this._contentPrecomputed = false;
 
     this.liquidEngine = new Liquid({
       root: '/',
@@ -983,6 +1097,9 @@ export class JekyllEngine {
     this._staticFiles = [];
     this._sassAssets = [];
     this.vfsTemplates = {};
+    // A fresh scan invalidates the build-time rendered-content cache
+    // (see _precomputeDocumentContent) -- entries are rebuilt below.
+    this._contentPrecomputed = false;
 
     // FIX (generic collections support): parse _config.yml in a
     // dedicated pre-pass, regardless of where it falls in the VFS
@@ -1123,7 +1240,11 @@ export class JekyllEngine {
             attributes,
             parsed?.slug,
             attributes.date || parsed?.date,
-            this._config
+            this._config,
+            // FIX (Bug 3 -- :path placeholder): Jekyll's :path is the
+            // collection-relative path without extension
+            // (Document#cleaned_relative_path).
+            path
           );
           this._collections.posts ||= [];
           this._collections.posts.push({
@@ -1181,7 +1302,11 @@ export class JekyllEngine {
             attributes,
             collectionName,
             relPath,
-            this._collectionsConfig[collectionName]
+            this._collectionsConfig[collectionName],
+            // FIX (Bug 3 -- date placeholders in collection permalinks):
+            // Jekyll's UrlDrop exposes :year/:month/:day/... for every
+            // document, from the resolved doc date.
+            docDate
           );
           this._collections[collectionName] ||= [];
           this._collections[collectionName].push({
@@ -1479,24 +1604,134 @@ export class JekyllEngine {
       const isPretty = permalinkStyle === 'pretty' || permalinkStyle === ':pretty';
       let url;
       if (attributes.permalink) {
-        url = attributes.permalink;
+        // FIX (Bug 3): Jekyll's Page#url substitutes the page placeholders
+        // (:path, :basename, :output_ext -- page.rb #url_placeholders)
+        // inside a front-matter `permalink:` instead of emitting it verbatim.
+        url = substitutePagePermalinkPlaceholders(attributes.permalink, p.path);
       } else if (p.path === 'index.md' || p.path === 'index.markdown' || p.path === 'index.html') {
         url = '/';
-      } else if (isPretty) {
-        url = `/${p.path.replace(/\.[^/.]+$/, '')}/`;
       } else {
         const base = p.path.replace(/\.[^/.]+$/, '');
         const ext = p.path.match(/\.[^/.]+$/)?.[0] || '.html';
         const outExt = ['.md', '.markdown'].includes(ext) ? '.html' : ext;
-        url = `/${base}${outExt}`;
+        // FIX (Bug 1 -- pretty permalinks on non-HTML pages): Jekyll's
+        // Page#template (lib/jekyll/page.rb) applies the site's permalink
+        // style only to HTML output (`if !html?` guard). atom.xml keeps
+        // /atom.xml even with `permalink: pretty` configured.
+        const isHtmlOutput = ['.html', '.xhtml', '.htm'].includes(outExt);
+        url = isPretty && isHtmlOutput ? `/${base}/` : `/${base}${outExt}`;
       }
       return {
         ...attributes,
         path: p.path,
         url,
-        content: body,
+        // FIX (just-the-docs S6 -- site.pages/site.html_pages content was
+        // raw markdown): real Jekyll's Convertible#to_liquid snapshots each
+        // page at template-access time, i.e. AFTER render_document overwrote
+        // content with the converted HTML (renderer.rb:85). Prefer the
+        // build-time precomputed rendering; fall back to a sync
+        // markdown-only conversion for .md sources (the raw body otherwise
+        // -- Liquid needs the async renderer, unavailable in this sync
+        // method). Never raw markdown for markdown sources.
+        content:
+          p._renderedContent ?? (/\.(md|markdown)$/i.test(p.path) ? this._renderMarkdown(body) : body),
       };
     });
+  }
+
+  /**
+   * Map one scanned post entry to its Liquid-visible form (site.posts
+   * entries, site.tags/site.categories values, page.next/page.previous).
+   * Real Jekyll exposes ALL front matter on a post (the original hardcoded
+   * a narrow whitelist, silently dropping custom fields like
+   * `listing-order`, `image`, `subtitle` -- now everything spreads through
+   * and only the computed fields below are overridden).
+   */
+  _mapPost(p) {
+    // Internal bookkeeping (_body, _permalink, ..., _renderedContent,
+    // _renderedExcerpt) must not leak into the Liquid context (there is a
+    // test asserting exactly that).
+    const {
+      _body,
+      _permalink,
+      _date,
+      _slug,
+      _excerptSeparator,
+      _excerpt,
+      _renderedContent,
+      _renderedExcerpt,
+      content: _rawContent,
+      ...rest
+    } = p;
+    // FIX (oracle-found): real Jekyll provides post.id (URL without extension,
+    // e.g. /2026/01/02/second). The feed template uses {{ post.id }}.
+    const id = _permalink ? _permalink.replace(/\.html$/, '').replace(/\/$/, '') : '';
+    // FIX (oracle-found): real Jekyll's post.date is a Time object with
+    // local timezone. We were passing a string which LiquidJS parsed as UTC.
+    // Parse as local midnight for correct date_to_xmlschema output.
+    const dateObj = parseLocalDate(_date);
+    return {
+      ...rest,
+      url: _permalink,
+      id,
+      date: dateObj || _date,
+      // Also fixes a dead `p._excerpt` reference (that field was never
+      // actually set anywhere) -- a real front-matter `excerpt:`
+      // override (now living in `rest.excerpt`) is respected first, and is
+      // used as-is: real Jekyll only builds an Excerpt object when the
+      // front matter has none (document.rb:539-540).
+      // FIX: excerpt now respects a configurable excerpt_separator
+      // (front matter > site config > Jekyll's own "\n\n" default)
+      // instead of always splitting on a blank line.
+      // FIX (minimal-mistakes #6): the auto excerpt is Liquid-rendered,
+      // then markdown-converted -- real Jekyll runs the full renderer over
+      // the extracted text (Excerpt#output, excerpt.rb:82-84).
+      // _renderedExcerpt is computed by _precomputeDocumentContent; the
+      // scan-time _excerpt (markdown-only) is the fallback before a build.
+      // NOTE: ?? (not ||) -- a correctly-rendered excerpt can be the empty
+      // string (e.g. the first paragraph was only {% assign %} tags), and
+      // that empty result must win over the markdown-only fallback.
+      excerpt: rest.excerpt ?? _renderedExcerpt ?? _excerpt ?? '',
+      // FIX (S3 / hyde S1 -- site.posts[].content was raw markdown):
+      // real Jekyll's Document#content is the Liquid-rendered +
+      // markdown-converted HTML -- Renderer#render_document overwrites it
+      // (renderer.rb:85) before any page template runs, and
+      // DocumentDrop#content reads the live document
+      // (document.rb:318-320). Never expose raw markdown here: prefer the
+      // build-time precomputed rendering, fall back to a sync
+      // markdown-only conversion.
+      content: _renderedContent ?? this._renderMarkdown(_body || ''),
+    };
+  }
+
+  /**
+   * Map one scanned generic-collection doc to its Liquid-visible form.
+   * Items carry the same `_body`/`_permalink` bookkeeping fields posts do,
+   * so they get the same treatment (full front matter preserved, internal
+   * fields cleaned up, rendered HTML as `content`).
+   */
+  _mapCollectionDoc(name, p) {
+    const { _body, _permalink, _relPath, _date, _renderedContent, content: _rawContent, ...rest } = p;
+    return {
+      ...rest,
+      // FIX (Bug 3): the scan-time `_permalink` already ran Jekyll's
+      // URL placeholder substitution (document.rb #url); it wins
+      // over the raw front-matter `permalink:` for `url`.
+      url: _permalink || rest.permalink || `/${name}/${(_relPath || p.path).replace(/\.[^/.]+$/, '')}/`,
+      path: p.path,
+      // FIX (collection docs had no date): real Jekyll's
+      // Document#date always resolves (front matter -> filename ->
+      // site.time); _date already carries that at scan time.
+      date: rest.date || _date,
+      // FIX (oracle-found): real Jekyll's doc.content is rendered HTML,
+      // not raw markdown -- Renderer#render_document overwrites
+      // Document#content with the Liquid-rendered + converted output
+      // (renderer.rb:85) before any page template runs. Prefer the
+      // build-time precomputed rendering; fall back to a sync
+      // markdown-only conversion.
+      content: _renderedContent ?? this._renderMarkdown(_body || ''),
+      collection: name,
+    };
   }
 
   _buildSiteContext(currentPost = null) {
@@ -1508,32 +1743,8 @@ export class JekyllEngine {
     // so `{{ post.image }}` or `{% assign s = site.posts | sort:
     // "listing-order" %}` silently did nothing. Real Jekyll exposes ALL
     // front matter on a post. Now we spread everything through and only
-    // override the handful of computed fields.
-    const posts = (this._collections.posts || []).map((p) => {
-      const { _body, _permalink, _date, _slug, _excerptSeparator, _excerpt, content: _rawContent, ...rest } = p;
-      // FIX (oracle-found): real Jekyll provides post.id (URL without extension,
-      // e.g. /2026/01/02/second). The feed template uses {{ post.id }}.
-      const id = _permalink ? _permalink.replace(/\.html$/, '').replace(/\/$/, '') : '';
-      // FIX (oracle-found): real Jekyll's post.date is a Time object with
-      // local timezone. We were passing a string which LiquidJS parsed as UTC.
-      // Parse as local midnight for correct date_to_xmlschema output.
-      const dateObj = parseLocalDate(_date);
-      return {
-        ...rest,
-        url: _permalink,
-        id,
-        date: dateObj || _date,
-        // Also fixes a dead `p._excerpt` reference (that field was never
-        // actually set anywhere) -- a real front-matter `excerpt:`
-        // override (now living in `rest.excerpt`) is respected first.
-        // FIX: excerpt now respects a configurable excerpt_separator
-        // (front matter > site config > Jekyll's own "\n\n" default)
-        // instead of always splitting on a blank line. The excerpt itself
-        // is precomputed at scan time (_excerpt) so post pages share it.
-        excerpt: rest.excerpt || _excerpt || '',
-        content: _body,
-      };
-    });
+    // override the handful of computed fields (see _mapPost).
+    const posts = (this._collections.posts || []).map((p) => this._mapPost(p));
 
     const tagsMap = {};
     const categoriesMap = {};
@@ -1574,29 +1785,11 @@ export class JekyllEngine {
     // scanning logic in useVFS carry the same `_body`/`_permalink`
     // bookkeeping fields posts do, so they get the same treatment here
     // (full front matter preserved, internal fields cleaned up, real
-    // body used as `content`).
+    // body used as `content`). See _mapCollectionDoc.
     const mappedCollections = Object.fromEntries(
       Object.entries(this._collections).map(([name, pages]) => {
         if (name === 'posts') return [name, posts];
-        return [
-          name,
-          pages.map((p) => {
-            const { _body, _permalink, _relPath, _date, content: _rawContent, ...rest } = p;
-            return {
-              ...rest,
-              url: rest.permalink || _permalink || `/${name}/${(_relPath || p.path).replace(/\.[^/.]+$/, '')}/`,
-              path: p.path,
-              // FIX (collection docs had no date): real Jekyll's
-              // Document#date always resolves (front matter -> filename ->
-              // site.time); _date already carries that at scan time.
-              date: rest.date || _date,
-              // FIX (oracle-found): real Jekyll's doc.content is rendered HTML,
-              // not raw markdown. Render it for template parity.
-              content: this._renderMarkdown(_body || ''),
-              collection: name,
-            };
-          }),
-        ];
+        return [name, pages.map((p) => this._mapCollectionDoc(name, p))];
       })
     );
 
@@ -1628,6 +1821,100 @@ export class JekyllEngine {
         documents: Object.values(mappedCollections).flat(),
       },
     };
+  }
+
+  /**
+   * The Liquid context for rendering one document's body during the
+   * precompute pass: the full site payload plus `page` (the document's own
+   * fields, without `content` -- exactly like _renderPage, where
+   * page.content is only assigned AFTER the body renders) and the
+   * jekyll.environment/version globals _renderPage injects.
+   */
+  _pageRenderContext(pageFields, currentPost = null) {
+    return {
+      ...this._buildSiteContext(currentPost),
+      page: pageFields,
+      // FIX (jekyll.environment was never injected): minima and many other
+      // themes gate Google Analytics and Disqus behind
+      // `if jekyll.environment == "production"`. Mirrors _renderPage.
+      jekyll: {
+        environment: this.options.environment || 'development',
+        version: '4.3.4',
+      },
+    };
+  }
+
+  /**
+   * Render one document body exactly like Jekyll's Renderer#render_document
+   * (renderer.rb:69-96): Liquid-render the body, then run the markdown
+   * converter for .md/.markdown sources. No layouts -- this produces the
+   * `content` value, not the final page output. Always goes through the
+   * configured markdown plugin via _renderMarkdown (never bypassed).
+   */
+  async _renderDocumentBody(path, rawBody, pageFields, currentPost = null) {
+    const ctx = this._pageRenderContext(pageFields, currentPost);
+    let out = await this.renderTemplate(rawBody, ctx);
+    if (path.endsWith('.md') || path.endsWith('.markdown')) {
+      out = this._renderMarkdown(out);
+    }
+    return out;
+  }
+
+  /**
+   * Pre-render every document's body once per build, mirroring real
+   * Jekyll's render order: Renderer#render_document runs (Liquid-render,
+   * then markdown-convert, no layouts) for every document BEFORE any page
+   * template executes, and overwrites Document#content with the converted
+   * output (renderer.rb:85). The converted HTML is stored as
+   * `_renderedContent` on each scan entry, so _buildSiteContext exposes
+   * rendered HTML -- never raw markdown -- as `content` in site.posts,
+   * site.pages, site.html_pages, site.documents, site.tags/categories,
+   * paginator.posts and page.next/previous.
+   *
+   * Excerpts get the same treatment: real Jekyll extracts the excerpt from
+   * the raw body at read time but RENDERS it lazily -- Excerpt#output runs
+   * the full renderer over the extracted text (excerpt.rb:82-84) -- so the
+   * auto excerpt is Liquid-rendered then markdown-converted here and stored
+   * as `_renderedExcerpt`. A front-matter `excerpt:` override is used as-is
+   * (real Jekyll only builds an Excerpt object when the front matter has
+   * none -- document.rb:539-540).
+   *
+   * Idempotent per VFS scan (useVFS resets the flag); _buildSiteContext
+   * falls back to a sync markdown-only conversion when the precompute has
+   * not run (e.g. direct _buildSiteContext() calls in tests).
+   */
+  async _precomputeDocumentContent() {
+    if (this._contentPrecomputed) return;
+    this._contentPrecomputed = true;
+
+    // Posts first (feeds and indexes read them), then other collections,
+    // then root pages -- mirrors Jekyll rendering documents before pages.
+    for (const p of this._collections.posts || []) {
+      const { content: _pc, ...pageFields } = this._mapPost(p);
+      if (!p.excerpt) {
+        const rawExcerpt = extractExcerpt(p._body || '', p._excerptSeparator);
+        p._renderedExcerpt = this._renderMarkdown(
+          await this.renderTemplate(rawExcerpt, this._pageRenderContext(pageFields, p))
+        );
+        pageFields.excerpt = p._renderedExcerpt;
+      }
+      p._renderedContent = await this._renderDocumentBody(p.path, p._body || '', pageFields, p);
+    }
+    for (const [name, pages] of Object.entries(this._collections)) {
+      if (name === 'posts') continue;
+      for (const p of pages) {
+        const { content: _c, ...pageFields } = this._mapCollectionDoc(name, p);
+        p._renderedContent = await this._renderDocumentBody(p.path, p._body || '', pageFields);
+      }
+    }
+    // Root pages last: templates like just-the-docs' search-data.json
+    // iterate site.html_pages expecting converted HTML (S6).
+    const summaries = new Map(this._buildRootPagesSummary().map((s) => [s.path, s]));
+    for (const rp of this._rootPages) {
+      const { body } = this._parseFrontMatter(rp.path, rp.content, 'pages');
+      const { content: _c, ...pageFields } = summaries.get(rp.path) || { path: rp.path };
+      rp._renderedContent = await this._renderDocumentBody(rp.path, body, pageFields);
+    }
   }
 
   // FIX (layout names without a file extension didn't resolve): real
@@ -1708,11 +1995,21 @@ export class JekyllEngine {
     // document is currently being rendered.
     const siteCtx = this._buildSiteContext(postMeta);
 
-    let localPermalink = overridePermalink || attributes.permalink;
+    // FIX (Bug 3 -- placeholder precedence): for posts/collection docs the
+    // scan-time `_permalink` already ran Jekyll's full URL placeholder
+    // substitution (document.rb #url via generatePermalink /
+    // generateCollectionPermalink), so it wins over the raw front-matter
+    // value. Plain pages substitute the smaller page.rb placeholder set
+    // (:path, :basename, :output_ext) instead of emitting it verbatim.
+    let localPermalink = overridePermalink || null;
+    if (!localPermalink && isPost && postMeta) {
+      localPermalink = postMeta._permalink;
+    }
+    if (!localPermalink && attributes.permalink) {
+      localPermalink = substitutePagePermalinkPlaceholders(attributes.permalink, path);
+    }
     if (!localPermalink) {
-      if (isPost && postMeta) {
-        localPermalink = postMeta._permalink;
-      } else if (path === 'index.md' || path === 'index.markdown' || path === 'index.html') {
+      if (path === 'index.md' || path === 'index.markdown' || path === 'index.html') {
         localPermalink = '/';
       } else {
         // FIX (oracle-found): real Jekyll defaults to /about.html style URLs
@@ -1723,16 +2020,20 @@ export class JekyllEngine {
         let p = path.replace(/\.[^/.]+$/, '');
         const isDirIndex = p.endsWith('/index');
         if (isDirIndex) p = p.slice(0, -'/index'.length);
+        // Default: /:path:output_ext → /about.html; markdown -> .html
+        const ext = path.match(/\.[^/.]+$/)?.[0] || '.html';
+        const outExt = ['.md', '.markdown'].includes(ext) ? '.html' : ext;
+        // FIX (Bug 1 -- pretty permalinks on non-HTML pages): Jekyll's
+        // Page#template (lib/jekyll/page.rb) applies the site's permalink
+        // style only to HTML output (`if !html?` guard). atom.xml keeps
+        // /atom.xml even with `permalink: pretty` configured.
+        const isHtmlOutput = ['.html', '.xhtml', '.htm'].includes(outExt);
         if (isDirIndex) {
           // Directory index (docs/index.html) → /docs/ always
           localPermalink = `/${p}/`;
-        } else if (isPretty) {
+        } else if (isPretty && isHtmlOutput) {
           localPermalink = `/${p}/`;
         } else {
-          // Default: /:path:output_ext → /about.html
-          const ext = path.match(/\.[^/.]+$/)?.[0] || '.html';
-          // Markdown pages output as HTML
-          const outExt = ['.md', '.markdown'].includes(ext) ? '.html' : ext;
           localPermalink = `/${p}${outExt}`;
         }
       }
@@ -1746,7 +2047,13 @@ export class JekyllEngine {
       isPost && postMeta
         ? {
             date: postMeta._date,
-            excerpt: attributes.excerpt || postMeta._excerpt || '',
+            // FIX (minimal-mistakes #6): prefer the fully rendered excerpt
+            // (Liquid-rendered + markdown-converted, computed by
+            // _precomputeDocumentContent); the scan-time _excerpt
+            // (markdown-only) is the fallback. Front-matter wins first,
+            // used as-is like real Jekyll (document.rb:539-540). ?? (not
+            // ||): a correctly-rendered excerpt can be the empty string.
+            excerpt: attributes.excerpt ?? postMeta._renderedExcerpt ?? postMeta._excerpt ?? '',
           }
         : {};
     // FIX (page.id/page.collection/page.next/page.previous were never
@@ -1810,12 +2117,20 @@ export class JekyllEngine {
       rendered = this._renderMarkdown(rendered);
     }
 
-    // FIX (page.content was never set): real Jekyll exposes the page's
+    // FIX (page.content was never set): real Jekyll exposes the document's
     // rendered body content (post-conversion, pre-layout) as page.content
     // -- beautiful-jekyll builds meta descriptions from it
     // (`{{ page.content | strip_html | truncatewords: 50 }}`). It is the
     // same value layouts receive as top-level `content`.
-    pageCtx.page.content = rendered;
+    // FIX (beautiful-jekyll S4 -- page/document asymmetry, oracle-verified):
+    // real Jekyll snapshots REGULAR PAGES via Convertible#to_liquid (a plain
+    // Hash built in assign_pages! BEFORE render_document -- convertible.rb,
+    // renderer.rb:52-65), so a page's own `page.content` is the RAW body
+    // (real tags/index.html meta descriptions contain the raw `{% assign %}`
+    // Liquid source). DOCUMENTS (posts, collection docs) instead get the
+    // live DocumentDrop (document.rb:318-320), so their page.content is the
+    // rendered HTML. `isPost` covers posts and collection docs here.
+    pageCtx.page.content = isPost ? rendered : body;
 
     if (attributes.layout || postMeta?.layout) {
       rendered = await this._applyLayouts(rendered, attributes.layout || postMeta.layout, pageCtx);
@@ -1876,6 +2191,14 @@ export class JekyllEngine {
 
     this.options.logger('Compiling resource dependency nodes...', 'info');
     const results = [];
+
+    // FIX (page.content/post.content rendered-vs-raw semantics): real
+    // Jekyll renders every document (Liquid + markdown, no layouts) BEFORE
+    // any page template runs and overwrites Document#content with the
+    // converted output (renderer.rb:85). Precompute those renderings now so
+    // the site payload -- which pagination, feeds, indexes and every page
+    // template read below -- never exposes raw markdown as `content`.
+    await this._precomputeDocumentContent();
 
     // Posts are needed up front for pagination math, regardless of
     // which root page ends up rendering first.
@@ -2107,6 +2430,7 @@ export {
   computeRelativeUrl,
   computeAbsoluteUrl,
   stripIndex,
+  permalinkToOutputPath,
   parseMarkdown,
   getPostCategories,
   getPostTags,

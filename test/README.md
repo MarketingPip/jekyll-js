@@ -14,7 +14,16 @@ Suite layout (run everything with `npm test` from the repo root):
   `layout-merge.test.js` (layout front-matter merge chain: `layout.*`
   variable exposure, layout→page deep merge, chained layouts
   innermost-first with the page winning, per-level `layout` var, cycle
-  safety).
+  safety), and `permalink-edge.test.js` (permalink edge cases: pretty
+  style keeps non-HTML extensions per page.rb `!html?`, trailing-slash
+  permalink → `index.html` output path per `Page#destination`,
+  front-matter permalink placeholder substitution per url.rb
+  `#generated_permalink`), and `page-content.test.js` (page.content /
+  post.content rendered-vs-raw semantics: site.posts / site.pages /
+  site.html_pages / site.documents expose Liquid-rendered +
+  markdown-converted HTML, a regular page's own `page.content` is the raw
+  body (S4), excerpts are Liquid-rendered + converted, front-matter
+  `excerpt:` used as-is).
 - **parity/** — behavioral parity against real Jekyll 4.3.2, exercised via
   `_buildSiteContext()` or small synthetic VFS builds:
   `jekyll-parity-2.test.js` (`site.static_files`, `site.related_posts`,
