@@ -430,6 +430,10 @@ function generatePermalink(frontMatter, slug, date, config = {}, relPath = '') {
     path = '/' + path;
   }
 
+  // FIX (URL percent-encoding): Ruby Jekyll percent-encodes URL path segments
+  // (e.g. `/test/edge case/` → `/test/edge%20case/`). Encode each segment.
+  path = path.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+
   return path;
 }
 
@@ -1429,6 +1433,23 @@ export class JekyllEngine {
         });
         continue;
       }
+      // FIX (FM-less .md): Files with convertible extensions (.md, .html, etc.)
+      // but WITHOUT front matter are static files in Jekyll (copied as-is,
+      // not rendered). Previously they were dropped.
+      {
+        const slashIdx = path.lastIndexOf('/');
+        const name = slashIdx === -1 ? path : path.slice(slashIdx + 1);
+        const extname = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
+        const basename = extname ? name.slice(0, -extname.length) : name;
+        this._staticFiles.push({
+          name,
+          extname,
+          basename,
+          path: `/${path}`,
+          modified_time: new Date(),
+        });
+        continue;
+      }
     }
 
     if (this._collections.posts) {
@@ -1506,6 +1527,12 @@ export class JekyllEngine {
     });
     // include wins over exclude
     if (matches(this._includeList || [])) return false;
+    // FIX (dotfile exclusion): Jekyll's EntryFilter excludes dotfiles
+    // (e.g. .gitignore, .github/) unless explicitly in `include`.
+    const segments = String(path).split('/');
+    if (segments.some((seg) => seg.startsWith('.') && seg !== '.' && seg !== '..')) {
+      return true;
+    }
     return matches(this._excludeList || []);
   }
 

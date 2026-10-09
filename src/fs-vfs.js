@@ -71,6 +71,10 @@ export function readDirToVFS(dir, options = {}) {
       // Skip if ANY path segment is ignored — matches the old battletest
       // walk, which checked each entry name at every depth.
       if (rel.split('/').some((seg) => ignore.includes(seg))) continue;
+      // FIX (dotfile exclusion): Jekyll's EntryFilter excludes dotfiles
+      // (e.g. .gitignore, .github/) unless explicitly in `include`.
+      // Without this, they get rendered as pages.
+      if (entry.name.startsWith('.')) continue;
       const full = curDir === '/' ? `/${entry.name}` : `${curDir}/${entry.name}`;
       if (entry.isDirectory()) {
         walk(full, rel);
