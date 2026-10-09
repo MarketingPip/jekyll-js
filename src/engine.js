@@ -141,7 +141,16 @@ function stripIndex(input) {
 // while the page URL stays `/about/`.
 function permalinkToOutputPath(permalink) {
   const rel = String(permalink).replace(/^\/+/, '');
-  return rel === '' || rel.endsWith('/') ? `${rel}index.html` : rel;
+  // FIX (%20 output-dir regression): URLs are percent-encoded, but the
+  // filesystem uses literal characters. Decode for the output path.
+  // e.g. `/my%20folder/` → `my folder/index.html` (not `my%20folder/`)
+  let decoded;
+  try {
+    decoded = decodeURIComponent(rel);
+  } catch (e) {
+    decoded = rel; // malformed encoding, use as-is
+  }
+  return decoded === '' || decoded.endsWith('/') ? `${decoded}index.html` : decoded;
 }
 
 // FIX (Bug 3 -- page permalink placeholders emitted verbatim): Jekyll's
