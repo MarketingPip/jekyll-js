@@ -22,10 +22,10 @@ export { applyJekyllCompat, detectJekyllCompat } from './jekyllCompat.js';
 
 // Lazy adapters (import when needed)
 export const adapters = {
-  /** @returns {Promise<import('./plugins.js').MarkdownRenderer>} */
+  /** @returns {Promise<Object>} MarkdownRenderer adapter */
   kramdown: () => import('./adapters/markdown-kramdown.js').then(m => m.default),
-  /** @returns {Promise<import('./plugins.js').MarkdownRenderer>} */
+  /** @returns {Promise<Object>} MarkdownRenderer adapter */
   marked: () => import('./adapters/markdown-marked.js').then(m => m.default),
-  /** @returns {Promise<import('./plugins.js').Highlighter>} */
+  /** @returns {Promise<Object>} Highlighter adapter */
   rouge: () => import('./adapters/highlight-rouge.js').then(m => m.default),
 };

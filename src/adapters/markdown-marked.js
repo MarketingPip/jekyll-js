@@ -29,7 +29,7 @@ function createMarkedRenderer() {
 const marked = new Marked({ renderer: createMarkedRenderer() });
 
 /**
- * @type {import('../plugins.js').MarkdownRenderer}
+ * @type {Object} MarkdownRenderer adapter
  */
 const markedAdapter = {
   name: 'marked',

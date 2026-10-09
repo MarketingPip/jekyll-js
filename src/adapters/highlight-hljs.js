@@ -48,7 +48,7 @@ async function loadLanguage(lang) {
 }
 
 /**
- * @type {import('../plugins.js').Highlighter}
+ * @type {Object} Highlighter adapter
  */
 const hljsAdapter = {
   name: 'highlight.js',

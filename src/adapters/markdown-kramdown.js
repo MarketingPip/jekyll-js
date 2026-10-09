@@ -11,7 +11,7 @@
 import { kramdown } from '../../../kramdown-js/kramdown.js';
 
 /**
- * @type {import('../plugins.js').MarkdownRenderer}
+ * @type {Object} MarkdownRenderer adapter
  */
 const kramdownAdapter = {
   name: 'kramdown',

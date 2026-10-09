@@ -11,7 +11,7 @@
 import { rougeHighlightInner } from '../../../kramdown-js/kramdown-rouge.js';
 
 /**
- * @type {import('../plugins.js').Highlighter}
+ * @type {Object} Highlighter adapter
  */
 const rougeAdapter = {
   name: 'rouge-compat',

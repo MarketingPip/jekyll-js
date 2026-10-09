@@ -608,7 +608,7 @@ export class JekyllEngine {
   /**
    * Get the markdown renderer adapter.
    * Defaults to the built-in marked adapter if none provided.
-   * @returns {import('./plugins.js').MarkdownRenderer}
+   * @returns {Object} MarkdownRenderer adapter
    */
   _getMarkdownRenderer() {
     if (!this._markdown) {
