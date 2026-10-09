@@ -1787,7 +1787,11 @@ export class JekyllEngine {
       // FIX (Bug 3): the scan-time `_permalink` already ran Jekyll's
       // URL placeholder substitution (document.rb #url); it wins
       // over the raw front-matter `permalink:` for `url`.
-      url: _permalink || rest.permalink || `/${name}/${(_relPath || p.path).replace(/\.[^/.]+$/, '')}/`,
+      // FIX (nav-url): strip trailing `/index` — `/docs/x/index/` → `/docs/x/`
+      url: (() => {
+        const u = _permalink || rest.permalink || `/${name}/${(_relPath || p.path).replace(/\.[^/.]+$/, '')}/`;
+        return u.replace(/\/index\/$/, '/');
+      })(),
       path: p.path,
       // FIX (collection docs had no date): real Jekyll's
       // Document#date always resolves (front matter -> filename ->
