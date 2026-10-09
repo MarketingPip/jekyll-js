@@ -7,7 +7,7 @@ missing, and where we deliberately differ.
 **Target version: Jekyll 4.3.4** (updated 2026-10-06; was 4.3.2).
 Verified via native Ruby oracle (real `jekyll` binary) and WASM oracle.
 
-## Grounding (2026-10-06, 270 tests)
+## Grounding (2026-10-09, 378 tests)
 
 | Grounding | Tests | What it means |
 |---|---|---|

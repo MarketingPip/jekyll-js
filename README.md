@@ -4,7 +4,7 @@
 
 `jekyll-js` is a faithful JavaScript port of Jekyll's static site engine. Hand it files, get back rendered HTML. No Ruby, no filesystem, no shell — it runs on a plain JS object (a virtual filesystem), which makes it perfect for browser playgrounds, in-app site builders, and AI agents that need to render Jekyll anywhere.
 
-- ✅ **True Jekyll parity** — 247 tests, battle-tested against the real Minima theme ([scoreboard](docs/parity.md))
+- ✅ **True Jekyll parity** — 378 tests, battle-tested against the real Minima theme ([scoreboard](docs/parity.md))
 - ✅ **Browser-ready** — 244KB core bundle, works from `file://`, heavy features lazy-load as plugins
 - ✅ **Programmatic API** — fluent builder, lifecycle events, JS plugin system
 - ✅ **TypeScript** — full type definitions included
@@ -57,6 +57,7 @@ npx jekyll-js serve --source ./my-site --port 4000
 |---|---|
 | [`examples/build-site.js`](examples/build-site.js) | Basic site build from VFS |
 | [`examples/plugin.js`](examples/plugin.js) | Custom plugin with hooks and generators |
+| [`examples/plugin-composition.js`](examples/plugin-composition.js) | Mixing markdown renderers, highlighters, and plugins |
 
 See the **[live playground](https://marketingpip.github.io/jekyll-js/)** for an interactive demo.
 
@@ -89,6 +90,68 @@ Heavy capabilities are opt-in:
 
 ---
 
+## Plugin Architecture
+
+Bring your own toolchain. jekyll-js provides defaults, never mandates them.
+
+### Markdown Renderers
+
+```js
+import { JekyllEngine } from 'jekyll-js/core';
+import kramdownAdapter from 'jekyll-js/adapters/markdown-kramdown';
+
+const engine = new JekyllEngine({
+  vfs,
+  markdown: kramdownAdapter, // or marked, or your own
+});
+
+// Custom renderer: any object with { name, render(src, opts) }
+const myRenderer = {
+  name: 'my-markdown',
+  render: (src, opts) => `<div>${src}</div>`,
+};
+```
+
+### Syntax Highlighters
+
+```js
+import hljsAdapter from 'jekyll-js/adapters/highlight-hljs';
+
+// Languages lazy-load on demand
+const engine = new JekyllEngine({
+  vfs,
+  highlighter: hljsAdapter,
+});
+
+// Preload for faster first render
+await hljsAdapter.preload(['javascript', 'python']);
+```
+
+### Tree-shakeable Entry Points
+
+| Entry | Size | Description |
+|---|---|---|
+| `jekyll-js/core` | ~300KB | Build only, default marked adapter |
+| `jekyll-js/liquid-only` | ~100KB | Just the template engine |
+| `jekyll-js/full` | ~500KB | Everything, adapters lazy-load |
+| `jekyll-js/worker` | ~300KB | Web Worker wrapper |
+
+### Jekyll Compatibility
+
+Drop in an existing Jekyll site — we auto-detect `_config.yml`:
+
+```js
+import { applyJekyllCompat } from 'jekyll-js/jekyllCompat';
+
+const engine = new JekyllEngine({ vfs });
+await applyJekyllCompat(engine, {
+  markdown: 'kramdown',    // loads kramdown-js adapter (warns: deprecated)
+  highlighter: 'rouge',   // loads rouge-compat adapter (warns: deprecated)
+});
+```
+
+---
+
 ## Documentation
 
 | | |
@@ -106,6 +169,17 @@ Heavy capabilities are opt-in:
 ```text
 src/                 Source code
 ├── engine.js        JekyllEngine class
+├── plugins.js       Plugin interfaces (MarkdownRenderer, Highlighter, etc.)
+├── jekyllCompat.js  Jekyll _config.yml compatibility layer
+├── core.js          Tree-shakeable: build only
+├── liquid-only.js   Tree-shakeable: just templates
+├── full.js          Tree-shakeable: everything, lazy adapters
+├── worker.js        Tree-shakeable: Web Worker wrapper
+├── adapters/
+│   ├── markdown-marked.js    Default marked adapter
+│   ├── markdown-kramdown.js  kramdown-js adapter (172/177 parity)
+│   ├── highlight-hljs.js     highlight.js (lazy languages)
+│   └── highlight-rouge.js    Rouge compat (byte-exact)
 ├── jekyllTags.js    Jekyll Liquid tags
 ├── jekyllFeed.js    jekyll-feed generator
 ├── assetsPipeline.js Sass pipeline
@@ -113,7 +187,7 @@ src/                 Source code
 ├── engine.d.ts      TypeScript definitions
 └── browser/         Browser entry points
 bin/                 CLI (jekyll-js build/serve)
-test/                247 tests
+test/                378 tests
 docs/                Developer documentation
 examples/            Runnable examples
 playground/          Interactive demo (deployed to GitHub Pages)
