@@ -15,7 +15,6 @@
  * Template source: https://github.com/jekyll/jekyll-feed/blob/v0.17.0/lib/jekyll-feed/feed.xml
  * (MIT license, (c) Jekyll contributors)
  */
-import { parseMarkdown } from './engine.js';
 
 export const FEED_TEMPLATE = `<?xml version="1.0" encoding="utf-8"?>
 {% if page.xsl %}
@@ -152,14 +151,14 @@ export async function generateFeeds(engine) {
   const siteCtx = engine._buildSiteContext().site;
   const results = [];
 
-  // FIX (oracle-found): real jekyll-feed uses rendered HTML for post.content,
-  // not raw markdown. Render each post's content to HTML.
-  for (const post of siteCtx.posts || []) {
-    if (post.content && !post.content.includes('<')) {
-      // Heuristic: if content doesn't contain HTML tags, it's raw markdown
-      post.content = parseMarkdown(post.content);
-    }
-  }
+  // NOTE: post.content here is already rendered HTML -- real Jekyll's
+  // Renderer#render_document overwrites Document#content with the
+  // Liquid-rendered + converted output (renderer.rb:85) before any page
+  // template runs, and _precomputeDocumentContent mirrors that at build
+  // time. (An earlier heuristic re-rendered post.content with the
+  // marked-based parseMarkdown here; it was removed because the source
+  // fix makes it redundant AND it bypassed the configured markdown plugin
+  // instead of going through engine._renderMarkdown().)
 
   const renderFeed = async (page) => {
     // FIX (oracle-found): real jekyll-feed minifies the template with

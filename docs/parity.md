@@ -55,7 +55,13 @@ parenthesized `{% if %}`/`{% elsif %}`/`{% unless %}` conditions (e.g.
 beautiful-jekyll's `(site.title != pagetitle)` — grouping parens stripped
 before LiquidJS parses; Ruby Liquid parity),
 static files emitted verbatim by build() (`_sass/` excluded),
-.xml/.json files with front matter rendered as pages.
+.xml/.json files with front matter rendered as pages,
+`page.content`/`post.content` rendered-vs-raw semantics (documents expose
+Liquid-rendered + converted HTML as `content` in `site.posts`/`site.pages`/
+`site.html_pages`/`site.documents`/feeds; a regular page's own
+`page.content` is the raw body per `Convertible#to_liquid` pre-render
+snapshot; excerpts are Liquid-rendered + converted per `Excerpt#output` --
+all oracle-verified against Jekyll 4.3.4).
 
 ## Known gaps
 

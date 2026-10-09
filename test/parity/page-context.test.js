@@ -9,11 +9,22 @@
  *  - page.next / page.previous (beautiful-jekyll prev/next post nav)
  *  - page.collection ("posts" for posts; chirpy archive/tag headings)
  *
- * Ground truth: jekyllrb.com/docs/variables/ + real Jekyll 4.4.1 output
+ * Ground truth: jekyllrb.com/docs/variables/ + real Jekyll 4.3.4 output
  * (Document#id, Document#next_doc/#previous_doc, DocumentDrop#collection
  * in jekyll/lib/jekyll/{document.rb,drops/document_drop.rb}).
- * In Jekyll, page.content is the page's rendered body (post-conversion,
- * pre-layout); page.next is the NEWER post, page.previous the OLDER one;
+ * In Jekyll, a DOCUMENT's page.content is the rendered body
+ * (post-conversion, pre-layout) via the live DocumentDrop
+ * (document.rb:318-320; renderer.rb:85 overwrites Document#content before
+ * any page template runs). A REGULAR PAGE's own page.content is instead
+ * the RAW body: Renderer#run snapshots the page via Convertible#to_liquid
+ * (a plain Hash) in assign_pages! BEFORE render_document
+ * (renderer.rb:52-65, convertible.rb:114-121). Verified with the native
+ * oracle (jekyll 4.3.4): layout 'WRAP({{ content }}|{{ page.content |
+ * strip }})' renders a post as 'WRAP(<p>...</p>|<p>...</p>)' but a page as
+ * 'WRAP(<p>...</p>|Hello *world*.\n\n{% assign x = 5 %}Raw check {{ x }}.)'.
+ * (theme-verify/beautiful-jekyll/REPORT.md S4: real tags/index.html meta
+ * descriptions contain the raw {% assign %} Liquid source.)
+ * page.next is the NEWER post, page.previous the OLDER one;
  * regular pages expose none of id/next/previous/collection (all nil).
  */
 import { JekyllEngine } from '../../src/engine.js';
@@ -32,14 +43,25 @@ function buildEngine(vfs) {
 }
 
 describe('page context (theme parity)', () => {
-  test('page.content exposes the rendered body to layouts', async () => {
+  test("a post's page.content exposes the rendered body to layouts", async () => {
+    const engine = buildEngine({
+      '_layouts/default.html': 'PAGECONTENT=[{{ page.content | strip }}]',
+      '_posts/2026-01-01-hello.md':
+        '---\nlayout: default\ntitle: Hello\n---\nAbout *body* here.',
+    });
+    const pages = await engine.build();
+    const post = pages.find((p) => p.path === '_posts/2026-01-01-hello.md');
+    expect(post.content).toContain('PAGECONTENT=[<p>About <em>body</em> here.</p>]');
+  });
+
+  test("a regular page's own page.content is the raw body (S4, oracle-verified)", async () => {
     const engine = buildEngine({
       '_layouts/default.html': 'PAGECONTENT=[{{ page.content | strip }}]',
       'about.md': '---\nlayout: default\ntitle: About\n---\nAbout *body* here.',
     });
     const pages = await engine.build();
     const about = pages.find((p) => p.permalink === '/about.html');
-    expect(about.content).toContain('PAGECONTENT=[<p>About <em>body</em> here.</p>]');
+    expect(about.content).toContain('PAGECONTENT=[About *body* here.]');
   });
 
   test('page.content is empty during the page’s own body render (matches Jekyll)', async () => {
@@ -105,6 +127,8 @@ describe('page context (theme parity)', () => {
     });
     const pages = await engine.build();
     const about = pages.find((p) => p.permalink === '/about.html');
-    expect(about.content).toContain('WRAP(<p>Hello <em>world</em>.</p>\n|<p>Hello <em>world</em>.</p>)');
+    // {{ content }} is the rendered body; a regular page's own page.content
+    // is the raw body (S4 -- oracle-verified, see the header comment).
+    expect(about.content).toContain('WRAP(<p>Hello <em>world</em>.</p>\n|Hello *world*.)');
   });
 });

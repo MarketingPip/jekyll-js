@@ -1829,10 +1829,15 @@ export class JekyllEngine {
    * fields, without `content` -- exactly like _renderPage, where
    * page.content is only assigned AFTER the body renders) and the
    * jekyll.environment/version globals _renderPage injects.
+   *
+   * NOTE: no currentPost is passed, so site.related_posts is NOT computed
+   * here -- _buildSiteContext(post) would invoke the relatedPostsFn once
+   * per document, tripling its build() call count (there is a test
+   * asserting it fires exactly once per post).
    */
-  _pageRenderContext(pageFields, currentPost = null) {
+  _pageRenderContext(pageFields) {
     return {
-      ...this._buildSiteContext(currentPost),
+      ...this._buildSiteContext(),
       page: pageFields,
       // FIX (jekyll.environment was never injected): minima and many other
       // themes gate Google Analytics and Disqus behind
@@ -1851,8 +1856,8 @@ export class JekyllEngine {
    * `content` value, not the final page output. Always goes through the
    * configured markdown plugin via _renderMarkdown (never bypassed).
    */
-  async _renderDocumentBody(path, rawBody, pageFields, currentPost = null) {
-    const ctx = this._pageRenderContext(pageFields, currentPost);
+  async _renderDocumentBody(path, rawBody, pageFields) {
+    const ctx = this._pageRenderContext(pageFields);
     let out = await this.renderTemplate(rawBody, ctx);
     if (path.endsWith('.md') || path.endsWith('.markdown')) {
       out = this._renderMarkdown(out);
@@ -1879,6 +1884,13 @@ export class JekyllEngine {
    * (real Jekyll only builds an Excerpt object when the front matter has
    * none -- document.rb:539-540).
    *
+   * Resilience: a document whose body fails Liquid rendering during the
+   * precompute (e.g. a tag the engine can't resolve in a document that
+   * build() would never render anyway) keeps _renderedContent unset, so
+   * _buildSiteContext's markdown-only fallback applies -- exactly today's
+   * behavior for that document. Documents build() DOES render still fail
+   * loudly in _renderPage, so no real error is masked.
+   *
    * Idempotent per VFS scan (useVFS resets the flag); _buildSiteContext
    * falls back to a sync markdown-only conversion when the precompute has
    * not run (e.g. direct _buildSiteContext() calls in tests).
@@ -1887,24 +1899,42 @@ export class JekyllEngine {
     if (this._contentPrecomputed) return;
     this._contentPrecomputed = true;
 
+    const warn = (path, e) =>
+      this.options.logger(
+        `Precompute: using markdown-only content for ${path} (${String(e.message).split('\n')[0]})`,
+        'warn'
+      );
+
     // Posts first (feeds and indexes read them), then other collections,
     // then root pages -- mirrors Jekyll rendering documents before pages.
     for (const p of this._collections.posts || []) {
       const { content: _pc, ...pageFields } = this._mapPost(p);
       if (!p.excerpt) {
-        const rawExcerpt = extractExcerpt(p._body || '', p._excerptSeparator);
-        p._renderedExcerpt = this._renderMarkdown(
-          await this.renderTemplate(rawExcerpt, this._pageRenderContext(pageFields, p))
-        );
-        pageFields.excerpt = p._renderedExcerpt;
+        try {
+          const rawExcerpt = extractExcerpt(p._body || '', p._excerptSeparator);
+          p._renderedExcerpt = this._renderMarkdown(
+            await this.renderTemplate(rawExcerpt, this._pageRenderContext(pageFields))
+          );
+          pageFields.excerpt = p._renderedExcerpt;
+        } catch (e) {
+          warn(p.path, e);
+        }
       }
-      p._renderedContent = await this._renderDocumentBody(p.path, p._body || '', pageFields, p);
+      try {
+        p._renderedContent = await this._renderDocumentBody(p.path, p._body || '', pageFields);
+      } catch (e) {
+        warn(p.path, e);
+      }
     }
     for (const [name, pages] of Object.entries(this._collections)) {
       if (name === 'posts') continue;
       for (const p of pages) {
         const { content: _c, ...pageFields } = this._mapCollectionDoc(name, p);
-        p._renderedContent = await this._renderDocumentBody(p.path, p._body || '', pageFields);
+        try {
+          p._renderedContent = await this._renderDocumentBody(p.path, p._body || '', pageFields);
+        } catch (e) {
+          warn(p.path, e);
+        }
       }
     }
     // Root pages last: templates like just-the-docs' search-data.json
@@ -1913,7 +1943,11 @@ export class JekyllEngine {
     for (const rp of this._rootPages) {
       const { body } = this._parseFrontMatter(rp.path, rp.content, 'pages');
       const { content: _c, ...pageFields } = summaries.get(rp.path) || { path: rp.path };
-      rp._renderedContent = await this._renderDocumentBody(rp.path, body, pageFields);
+      try {
+        rp._renderedContent = await this._renderDocumentBody(rp.path, body, pageFields);
+      } catch (e) {
+        warn(rp.path, e);
+      }
     }
   }
 
