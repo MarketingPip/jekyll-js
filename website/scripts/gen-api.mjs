@@ -29,6 +29,8 @@ const repoRoot = dirname(websiteDir);
 // source file → page slug (dest: docs/api/<slug>-reference.md)
 const SOURCES = [
   ['src/engine.js', 'engine'],
+  ['src/plugins.js', 'plugins'],
+  ['src/jekyllCompat.js', 'jekyll-compat'],
   ['src/jekyllTags.js', 'jekyll-tags'],
   ['src/jekyllFeed.js', 'jekyll-feed'],
   ['src/jekyllSitemap.js', 'jekyll-sitemap'],
@@ -39,6 +41,8 @@ const SOURCES = [
 
 const TITLES = {
   engine: 'Engine API',
+  plugins: 'Plugin Interfaces',
+  'jekyll-compat': 'Jekyll Compatibility',
   'jekyll-tags': 'Jekyll Tags API',
   'jekyll-feed': 'Jekyll Feed API',
   'jekyll-sitemap': 'Jekyll Sitemap API',
@@ -54,6 +58,9 @@ const TITLES = {
  * ReferenceError). Entities render as literal braces in text, but must stay
  * raw inside fenced code blocks and inline code spans, where they would
  * show literally — so those are left untouched.
+ *
+ * Also escapes `<` when followed by `=` or `>` (e.g. Ruby's `<=>` spaceship
+ * operator) which MDX parses as JSX.
  */
 const escapeBracesText = (text) => {
   let inFence = false;
@@ -71,7 +78,11 @@ const escapeBracesText = (text) => {
         .map((seg, i) =>
           i % 2 === 1
             ? seg
-            : seg.replace(/{/g, '&#123;').replace(/}/g, '&#125;')
+            : seg
+                .replace(/{/g, '&#123;')
+                .replace(/}/g, '&#125;')
+                // Escape <=> and similar (MDX parses < as JSX)
+                .replace(/<(?=[=>])/g, '&#60;')
         )
         .join('');
     })

@@ -84,10 +84,10 @@
  *
  * @typedef {Object} SitePlugin
  * @property {string} name - Plugin name
- * @property {(site: Site) => void | Promise<void>} [onInit] - Called after config load
- * @property {(site: Site) => void | Promise<void>} [preRender] - Before rendering
- * @property {(site: Site) => void | Promise<void>} [postRender] - After rendering
- * @property {(site: Site) => void | Promise<void>} [postWrite] - After files written
+ * @property {Function} [onInit] - Called after config load
+ * @property {Function} [preRender] - Before rendering
+ * @property {Function} [postRender] - After rendering
+ * @property {Function} [postWrite] - After files written
  */
 
 /**

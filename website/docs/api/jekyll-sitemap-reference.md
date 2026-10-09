@@ -6,6 +6,7 @@ title: Jekyll Sitemap API
 
 
 - [isSitemapEnabled()](#isSitemapEnabled)
+- [compareDocsByDateThenPath()](#compareDocsByDateThenPath)
 
 
 <a name="isSitemapEnabled"></a>
@@ -22,6 +23,17 @@ attribution). Opt-in via `_config.yml`:
 
 Template source: https://github.com/jekyll/jekyll-sitemap/blob/v1.4.0/lib/sitemap.xml
 (MIT license, (c) Jekyll contributors)
+
+**Kind**: global function  
+<a name="compareDocsByDateThenPath"></a>
+
+## compareDocsByDateThenPath()
+Sort comparator mirroring Jekyll's Document#&#60;=> (document.rb): date
+ascending, then relative-path tie-break. A doc with no resolvable date
+compares equal on the date step (real Jekyll falls back to site.time for
+all of them), so the path decides -- exactly like Ruby's
+`data["date"] <=> other.data["date"]` returning nil and falling through
+to the path comparison.
 
 **Kind**: global function  
 <a name="generateSitemap"></a>
