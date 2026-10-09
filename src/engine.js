@@ -747,7 +747,21 @@ export class JekyllEngine {
    */
   _renderMarkdown(src) {
     const renderer = this._markdown || this._getMarkdownRenderer();
-    const result = renderer.render(String(src), this._config?.kramdown || {});
+    // FIX (kramdown defaults): Jekyll's default kramdown config includes
+    // `input: GFM` (GitHub Flavored Markdown). Without this, backtick fences
+    // don't parse. Merge Jekyll's documented defaults with user config.
+    const kramdownDefaults = {
+      input: 'GFM',
+      hard_wrap: false,
+      auto_ids: true,
+      footnote_nr: 1,
+      entity_output: 'as_char',
+      toc_levels: [1, 2, 3, 4, 5, 6],
+      smart_quotes: ['lsquo', 'rsquo', 'ldquo', 'rdquo'],
+      typographer: true,
+    };
+    const kramdownOpts = { ...kramdownDefaults, ...(this._config?.kramdown || {}) };
+    const result = renderer.render(String(src), kramdownOpts);
     // Support async renderers: if Promise, throw helpful error
     // (use async build methods for async renderers)
     if (result && typeof result.then === 'function') {
@@ -1364,7 +1378,10 @@ export class JekyllEngine {
       // branch below. Markdown conversion stays gated on .md/.markdown
       // in _renderPage, so these are Liquid-rendered only.
       if (/\.(md|markdown|html|liquid|xml|json)$/i.test(path)) {
-        const hasFrontMatter = content.startsWith('---\n') || content.startsWith('---\r\n');
+        // FIX (Buffer crash): binary files are stored as Buffer; they never
+        // have front matter. Skip the string check.
+        const contentStr = Buffer.isBuffer(content) ? '' : String(content);
+        const hasFrontMatter = contentStr.startsWith('---\n') || contentStr.startsWith('---\r\n');
         if (hasFrontMatter) {
           this._rootPages.push({ path, content });
         } else {
@@ -1405,7 +1422,9 @@ export class JekyllEngine {
       // .scss/.sass stay claimed by the Sass pipeline above. _sass/ is
       // never page-able either (Sass partials land, like real Jekyll) --
       // it keeps its pre-existing static-file classification.
-      const hasFrontMatter = content.startsWith('---\n') || content.startsWith('---\r\n');
+      // FIX (Buffer crash): binary files are Buffer; they never have FM.
+      const contentStr = Buffer.isBuffer(content) ? '' : String(content);
+      const hasFrontMatter = contentStr.startsWith('---\n') || contentStr.startsWith('---\r\n');
       const inSassDir = path === '_sass' || path.startsWith('_sass/') || path.includes('/_sass/');
       if (hasFrontMatter && !inSassDir) {
         this._rootPages.push({ path, content });
