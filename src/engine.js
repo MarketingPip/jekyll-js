@@ -507,6 +507,10 @@ export class JekyllEngine {
       ...options,
     };
 
+    // Plugin: markdown renderer (defaults to built-in marked adapter)
+    // Accepts a MarkdownRenderer adapter: { name, render(src, opts) }
+    this._markdown = options.markdown || null; // lazy-loaded below
+
     this._config = {};
     this._layouts = {};
     this._includes = {};
@@ -601,6 +605,42 @@ export class JekyllEngine {
     if (options.vfs) this.useVFS(options.vfs);
   }
 
+  /**
+   * Get the markdown renderer adapter.
+   * Defaults to the built-in marked adapter if none provided.
+   * @returns {import('./plugins.js').MarkdownRenderer}
+   */
+  _getMarkdownRenderer() {
+    if (!this._markdown) {
+      // Default: use the module-level parseMarkdown (marked-based)
+      // Wrapped as an adapter for interface consistency
+      this._markdown = {
+        name: 'marked-builtin',
+        render: (src, opts) => parseMarkdown(src),
+      };
+    }
+    return this._markdown;
+  }
+
+  /**
+   * Render markdown to HTML using the configured adapter.
+   * @param {string} src - Markdown source
+   * @returns {string} HTML output
+   */
+  _renderMarkdown(src) {
+    const renderer = this._markdown || this._getMarkdownRenderer();
+    const result = renderer.render(String(src), this._config?.kramdown || {});
+    // Support async renderers: if Promise, throw helpful error
+    // (use async build methods for async renderers)
+    if (result && typeof result.then === 'function') {
+      throw new Error(
+        '[jekyll-js] Async markdown renderer detected. ' +
+        'Use async build methods or provide a sync renderer.'
+      );
+    }
+    return result;
+  }
+
   _resolveVfsPath(file) {
     // FIX (include/layout precedence): Jekyll's {% include %} searches ONLY
     // _includes/, so _includes/ must win over _layouts/ here. The old order
@@ -646,7 +686,7 @@ export class JekyllEngine {
       strip_index: (input) => stripIndex(input),
       // FIX (#6 -- no inline `markdownify` filter existed, only the
       // page-level .md -> HTML conversion step):
-      markdownify: (input) => parseMarkdown(input),
+      markdownify: (input) => this._renderMarkdown(input),
       // FIX (oracle-found): LiquidJS's date_to_xmlschema outputs UTC
       // (+00:00) for Date objects accessed via property (e.g., post.date).
       // Real Jekyll outputs local offset (-05:00). Override to ensure
@@ -1104,7 +1144,7 @@ export class JekyllEngine {
             // once at scan time so both site.posts entries AND the post's
             // own page context share it (a front-matter `excerpt:` still
             // wins -- see _buildSiteContext/_renderPage).
-            _excerpt: parseMarkdown(extractExcerpt(body, excerptSeparator)),
+            _excerpt: this._renderMarkdown(extractExcerpt(body, excerptSeparator)),
           });
         } catch (e) {
           // YAML errors are handled by _parseFrontMatter (warn-and-keep);
@@ -1552,7 +1592,7 @@ export class JekyllEngine {
               date: rest.date || _date,
               // FIX (oracle-found): real Jekyll's doc.content is rendered HTML,
               // not raw markdown. Render it for template parity.
-              content: parseMarkdown(_body || ''),
+              content: this._renderMarkdown(_body || ''),
               collection: name,
             };
           }),
@@ -1740,7 +1780,7 @@ export class JekyllEngine {
     // FIX (.markdown extension): also convert .markdown files to HTML,
     // not just .md files.
     if (path.endsWith('.md') || path.endsWith('.markdown')) {
-      rendered = parseMarkdown(rendered);
+      rendered = this._renderMarkdown(rendered);
     }
 
     // FIX (page.content was never set): real Jekyll exposes the page's
