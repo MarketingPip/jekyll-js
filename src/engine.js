@@ -1659,15 +1659,42 @@ export class JekyllEngine {
     return this.liquidEngine.parseAndRender(preprocessConditionals(source), scope);
   }
 
-  async _applyLayouts(html, layoutName, ctx) {
+  /**
+   * Resolve the layout chain for a layout name, innermost-first.
+   * Returns [{ name, data, body }] for each level: the page's own layout,
+   * then the layout named in that layout's front matter, and so on.
+   * Cycles are cut (Jekyll would loop too; we stop instead).
+   */
+  _layoutChain(layoutName) {
+    const chain = [];
     const visited = new Set();
     while (layoutName && !visited.has(layoutName)) {
       visited.add(layoutName);
       const layoutContent = this._resolveLayout(layoutName);
       if (!layoutContent) break;
       const { attributes: fmLayout, body: layoutBody } = this._parseFrontMatter(`_layouts/${layoutName}`, layoutContent);
-      html = await this.renderTemplate(layoutBody, { ...ctx, content: html });
+      chain.push({ name: layoutName, data: fmLayout, body: layoutBody });
       layoutName = fmLayout.layout;
+    }
+    return chain;
+  }
+
+  // FIX (layout merge chain): real Jekyll (lib/jekyll/renderer.rb
+  // #render_layout) deep-merges each layout's front matter into the page
+  // payload at every level -- the page wins over its layout, which wins
+  // over the parent layout -- and exposes the current layout's front
+  // matter as the `layout` variable:
+  //   payload = Utils.deep_merge_hashes(payload, {
+  //     "content" => output, "page" => layout.data.merge(payload["page"]),
+  //     "layout"  => layout.data })
+  // Before this fix, `{{ layout.css }}` rendered empty (no `layout` var),
+  // layout front matter never reached `page.*`, and only the top layout's
+  // chain link was honoured.
+  async _applyLayouts(html, layoutName, ctx) {
+    let page = ctx.page;
+    for (const { data, body } of this._layoutChain(layoutName)) {
+      page = deepMerge(data, page);
+      html = await this.renderTemplate(body, { ...ctx, page, content: html, layout: data });
     }
     return html;
   }

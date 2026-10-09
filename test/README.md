@@ -10,7 +10,11 @@ Suite layout (run everything with `npm test` from the repo root):
   programmatic file API: `writeFile`/`readFile`/`removeFile`/`listFiles`),
   and `fs-vfs.test.js` (the universal directory→VFS adapter: real temp
   dirs, real memfs, fake-fs injection, binary placeholders, the
-  no-`node:`-import browser-safety guard).
+  no-`node:`-import browser-safety guard), and
+  `layout-merge.test.js` (layout front-matter merge chain: `layout.*`
+  variable exposure, layout→page deep merge, chained layouts
+  innermost-first with the page winning, per-level `layout` var, cycle
+  safety).
 - **parity/** — behavioral parity against real Jekyll 4.3.2, exercised via
   `_buildSiteContext()` or small synthetic VFS builds:
   `jekyll-parity-2.test.js` (`site.static_files`, `site.related_posts`,
