@@ -872,6 +872,35 @@ export class JekyllEngine {
         const offMin = pad(Math.abs(offset) % 60);
         return `${year}-${month}-${day}T${hour}:${min}:${sec}${sign}${offHour}:${offMin}`;
       },
+      // FIX (timezone): LiquidJS's date_to_rfc822 outputs UTC (+0000).
+      // Real Jekyll outputs local timezone (-0500). Override.
+      date_to_rfc822: (input) => {
+        let d;
+        if (input instanceof Date) {
+          d = input;
+        } else if (typeof input === 'string' || typeof input === 'number') {
+          d = parseLocalDate(input) || new Date(input);
+        } else {
+          return this.liquidEngine.filters.date_to_rfc822(input);
+        }
+        if (!d || isNaN(d.getTime())) return '';
+        // Format as RFC822: "Fri, 28 Feb 2020 00:00:00 -0500" (local tz)
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const pad = (n) => String(n).padStart(2, '0');
+        const dayName = days[d.getDay()];
+        const day = pad(d.getDate());
+        const monthName = months[d.getMonth()];
+        const year = d.getFullYear();
+        const hour = pad(d.getHours());
+        const min = pad(d.getMinutes());
+        const sec = pad(d.getSeconds());
+        const offset = -d.getTimezoneOffset();
+        const sign = offset >= 0 ? '+' : '-';
+        const offHour = pad(Math.floor(Math.abs(offset) / 60));
+        const offMin = pad(Math.abs(offset) % 60);
+        return `${dayName}, ${day} ${monthName} ${year} ${hour}:${min}:${sec} ${sign}${offHour}${offMin}`;
+      },
     };
 
     for (const [name, fn] of Object.entries(filters)) {
