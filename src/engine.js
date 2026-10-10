@@ -1509,8 +1509,17 @@ export class JekyllEngine {
       }
     }
 
+    // FIX (same-date ordering): Ruby's Document#<=> tie-breaks by path
+    // when dates are equal. Without this, same-date posts order randomly.
     if (this._collections.posts) {
-      this._collections.posts.sort((a, b) => new Date(b._date) - new Date(a._date));
+      this._collections.posts.sort((a, b) => {
+        const dateDiff = new Date(b._date) - new Date(a._date);
+        if (dateDiff !== 0) return dateDiff;
+        // Tie-break by path (descending, matching Ruby's behavior)
+        const pathA = a.path || '';
+        const pathB = b.path || '';
+        return pathB.localeCompare(pathA);
+      });
     }
 
     // FIX (collection docs were unsorted): real Jekyll's Collection#read
