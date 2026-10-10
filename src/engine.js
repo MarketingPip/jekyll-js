@@ -901,6 +901,54 @@ export class JekyllEngine {
         const offMin = pad(Math.abs(offset) % 60);
         return `${dayName}, ${day} ${monthName} ${year} ${hour}:${min}:${sec} ${sign}${offHour}${offMin}`;
       },
+      // FIX (generic date filter timezone): LiquidJS's `date` filter formats
+      // in UTC. Real Jekyll uses local timezone. Override to use local.
+      // Supports common strftime directives: %a %A %b %B %d %e %m %Y %y %H %I %M %S %p %z %Z %%
+      date: (input, format) => {
+        let d;
+        if (input instanceof Date) {
+          d = input;
+        } else if (typeof input === 'string' || typeof input === 'number') {
+          // 'now' or 'today' keywords
+          if (input === 'now' || input === 'today') d = new Date();
+          else d = parseLocalDate(input) || new Date(input);
+        } else {
+          return this.liquidEngine.filters.date(input, format);
+        }
+        if (!d || isNaN(d.getTime())) return input;
+        if (!format) format = '%Y-%m-%d';
+        const pad = (n, l = 2) => String(n).padStart(l, '0');
+        const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const daysLong = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthsLong = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const offset = -d.getTimezoneOffset();
+        const sign = offset >= 0 ? '+' : '-';
+        const offStr = sign + pad(Math.floor(Math.abs(offset) / 60)) + pad(Math.abs(offset) % 60);
+        const hour12 = d.getHours() % 12 || 12;
+        return String(format).replace(/%([aAbBdeHImMpSyYZz%])/g, (m, c) => {
+          switch (c) {
+            case 'a': return daysShort[d.getDay()];
+            case 'A': return daysLong[d.getDay()];
+            case 'b': return monthsShort[d.getMonth()];
+            case 'B': return monthsLong[d.getMonth()];
+            case 'd': return pad(d.getDate());
+            case 'e': return String(d.getDate()).padStart(2, ' ');
+            case 'm': return pad(d.getMonth() + 1);
+            case 'Y': return d.getFullYear();
+            case 'y': return pad(d.getFullYear() % 100);
+            case 'H': return pad(d.getHours());
+            case 'I': return pad(hour12);
+            case 'M': return pad(d.getMinutes());
+            case 'S': return pad(d.getSeconds());
+            case 'p': return d.getHours() < 12 ? 'AM' : 'PM';
+            case 'z': return offStr;
+            case 'Z': return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            case '%': return '%';
+            default: return m;
+          }
+        });
+      },
     };
 
     for (const [name, fn] of Object.entries(filters)) {
@@ -1709,7 +1757,10 @@ export class JekyllEngine {
       const { attributes, body } = this._parseFrontMatter(p.path, p.content, 'pages');
       // FIX (oracle-found): match Jekyll's default /about.html URLs, not /about/.
       const permalinkStyle = this._config?.permalink || this._config?.permalink_style || '';
-      const isPretty = permalinkStyle === 'pretty' || permalinkStyle === ':pretty';
+      // FIX (pretty detection): Jekyll treats permalink patterns ending with `/`
+      // as "pretty" style for pages (e.g. `/:year-:month-:day-:title/` → /aboutme/)
+      const isPretty = permalinkStyle === 'pretty' || permalinkStyle === ':pretty' ||
+        (typeof permalinkStyle === 'string' && permalinkStyle.endsWith('/'));
       let url;
       if (attributes.permalink) {
         // FIX (Bug 3): Jekyll's Page#url substitutes the page placeholders
@@ -2162,9 +2213,10 @@ export class JekyllEngine {
       } else {
         // FIX (oracle-found): real Jekyll defaults to /about.html style URLs
         // for pages, not /about/ (pretty). Only use pretty when
-        // permalink: pretty (or :pretty) is configured.
+        // permalink: pretty (or :pretty, or pattern ending with /) is configured.
         const permalinkStyle = this._config?.permalink || this._config?.permalink_style || '';
-        const isPretty = permalinkStyle === 'pretty' || permalinkStyle === ':pretty';
+        const isPretty = permalinkStyle === 'pretty' || permalinkStyle === ':pretty' ||
+          (typeof permalinkStyle === 'string' && permalinkStyle.endsWith('/'));
         let p = path.replace(/\.[^/.]+$/, '');
         const isDirIndex = p.endsWith('/index');
         if (isDirIndex) p = p.slice(0, -'/index'.length);
