@@ -249,6 +249,59 @@ function parseLocalDate(dateStr) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// FIX (site.timezone): Get date components in a specific IANA timezone.
+// Uses Intl.DateTimeFormat to extract parts. Falls back to local if
+// timezone is invalid or not specified.
+function getDatePartsInTimezone(date, timezone) {
+  if (!timezone) {
+    // Local timezone (existing behavior)
+    return {
+      year: date.getFullYear(),
+      month: date.getMonth(),
+      day: date.getDate(),
+      weekday: date.getDay(),
+      hours: date.getHours(),
+      minutes: date.getMinutes(),
+      seconds: date.getSeconds(),
+      // Offset in minutes (positive east of UTC)
+      offsetMinutes: -date.getTimezoneOffset(),
+    };
+  }
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      weekday: 'short',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(date);
+    const get = (type) => parts.find((p) => p.type === type)?.value;
+    // Get offset by comparing UTC to timezone time
+    const tzDate = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
+    const utcDate = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
+    const offsetMinutes = Math.round((tzDate - utcDate) / 60000);
+    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    return {
+      year: parseInt(get('year'), 10),
+      month: parseInt(get('month'), 10) - 1,
+      day: parseInt(get('day'), 10),
+      weekday: weekdays.indexOf(get('weekday')),
+      hours: parseInt(get('hour'), 10) % 24,
+      minutes: parseInt(get('minute'), 10),
+      seconds: parseInt(get('second'), 10),
+      offsetMinutes,
+    };
+  } catch (e) {
+    // Invalid timezone, fall back to local
+    return getDatePartsInTimezone(date, null);
+  }
+}
+
 // FIX (YAML merge keys): js-yaml 5.x dropped the `!!merge` tag from its
 // default schema, so `<<: *anchor` stopped resolving (the merge key was
 // left as a literal `"<<"` property). Ruby's Psych resolves merge keys,
@@ -858,22 +911,24 @@ export class JekyllEngine {
           return this.liquidEngine.filters.date_to_xmlschema(input);
         }
         if (!d || isNaN(d.getTime())) return '';
-        // Format as YYYY-MM-DDTHH:MM:SS±HH:MM (local timezone)
+        // Format as YYYY-MM-DDTHH:MM:SS±HH:MM (site.timezone or local)
+        const siteTimezone = this._config?.timezone;
+        const parts = getDatePartsInTimezone(d, siteTimezone);
         const pad = (n) => String(n).padStart(2, '0');
-        const year = d.getFullYear();
-        const month = pad(d.getMonth() + 1);
-        const day = pad(d.getDate());
-        const hour = pad(d.getHours());
-        const min = pad(d.getMinutes());
-        const sec = pad(d.getSeconds());
-        const offset = -d.getTimezoneOffset();
+        const year = parts.year;
+        const month = pad(parts.month + 1);
+        const day = pad(parts.day);
+        const hour = pad(parts.hours);
+        const min = pad(parts.minutes);
+        const sec = pad(parts.seconds);
+        const offset = parts.offsetMinutes;
         const sign = offset >= 0 ? '+' : '-';
         const offHour = pad(Math.floor(Math.abs(offset) / 60));
         const offMin = pad(Math.abs(offset) % 60);
         return `${year}-${month}-${day}T${hour}:${min}:${sec}${sign}${offHour}:${offMin}`;
       },
       // FIX (timezone): LiquidJS's date_to_rfc822 outputs UTC (+0000).
-      // Real Jekyll outputs local timezone (-0500). Override.
+      // Real Jekyll outputs site.timezone or local (-0500). Override.
       date_to_rfc822: (input) => {
         let d;
         if (input instanceof Date) {
@@ -884,18 +939,20 @@ export class JekyllEngine {
           return this.liquidEngine.filters.date_to_rfc822(input);
         }
         if (!d || isNaN(d.getTime())) return '';
-        // Format as RFC822: "Fri, 28 Feb 2020 00:00:00 -0500" (local tz)
+        // Format as RFC822: "Fri, 28 Feb 2020 00:00:00 -0500" (site.timezone or local)
+        const siteTimezone = this._config?.timezone;
+        const parts = getDatePartsInTimezone(d, siteTimezone);
         const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const pad = (n) => String(n).padStart(2, '0');
-        const dayName = days[d.getDay()];
-        const day = pad(d.getDate());
-        const monthName = months[d.getMonth()];
-        const year = d.getFullYear();
-        const hour = pad(d.getHours());
-        const min = pad(d.getMinutes());
-        const sec = pad(d.getSeconds());
-        const offset = -d.getTimezoneOffset();
+        const dayName = days[parts.weekday];
+        const day = pad(parts.day);
+        const monthName = months[parts.month];
+        const year = parts.year;
+        const hour = pad(parts.hours);
+        const min = pad(parts.minutes);
+        const sec = pad(parts.seconds);
+        const offset = parts.offsetMinutes;
         const sign = offset >= 0 ? '+' : '-';
         const offHour = pad(Math.floor(Math.abs(offset) / 60));
         const offMin = pad(Math.abs(offset) % 60);
@@ -923,36 +980,39 @@ export class JekyllEngine {
         }
         if (!d || isNaN(d.getTime())) return input;
         if (!format) format = '%Y-%m-%d';
+        // FIX (site.timezone): Use configured timezone, not VM local
+        const siteTimezone = this._config?.timezone;
+        const parts = getDatePartsInTimezone(d, siteTimezone);
         const pad = (n, l = 2) => String(n).padStart(l, '0');
         const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const daysLong = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const monthsLong = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-        const offset = -d.getTimezoneOffset();
+        const offset = parts.offsetMinutes;
         const sign = offset >= 0 ? '+' : '-';
         const offStr = sign + pad(Math.floor(Math.abs(offset) / 60)) + pad(Math.abs(offset) % 60);
-        const hour12 = d.getHours() % 12 || 12;
+        const hour12 = parts.hours % 12 || 12;
         // Handle %- flag for unpadded values (e.g. %-d, %-m)
         return String(format).replace(/%(-?)([aAbBdeHImMpSyYZz%])/g, (m, dash, c) => {
           const unpadded = dash === '-';
           const fmt = (n) => unpadded ? String(n) : pad(n);
           switch (c) {
-            case 'a': return daysShort[d.getDay()];
-            case 'A': return daysLong[d.getDay()];
-            case 'b': return monthsShort[d.getMonth()];
-            case 'B': return monthsLong[d.getMonth()];
-            case 'd': return fmt(d.getDate());
-            case 'e': return String(d.getDate()).padStart(2, ' ');
-            case 'm': return fmt(d.getMonth() + 1);
-            case 'Y': return d.getFullYear();
-            case 'y': return pad(d.getFullYear() % 100);
-            case 'H': return fmt(d.getHours());
+            case 'a': return daysShort[parts.weekday];
+            case 'A': return daysLong[parts.weekday];
+            case 'b': return monthsShort[parts.month];
+            case 'B': return monthsLong[parts.month];
+            case 'd': return fmt(parts.day);
+            case 'e': return String(parts.day).padStart(2, ' ');
+            case 'm': return fmt(parts.month + 1);
+            case 'Y': return parts.year;
+            case 'y': return pad(parts.year % 100);
+            case 'H': return fmt(parts.hours);
             case 'I': return fmt(hour12);
-            case 'M': return fmt(d.getMinutes());
-            case 'S': return fmt(d.getSeconds());
-            case 'p': return d.getHours() < 12 ? 'AM' : 'PM';
+            case 'M': return fmt(parts.minutes);
+            case 'S': return fmt(parts.seconds);
+            case 'p': return parts.hours < 12 ? 'AM' : 'PM';
             case 'z': return offStr;
-            case 'Z': return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            case 'Z': return siteTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || '';
             case '%': return '%';
             default: return m;
           }
