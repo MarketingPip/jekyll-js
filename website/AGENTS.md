@@ -59,9 +59,20 @@ website/
 `npm run build:types` (from repo root) generates `dist/types/*.d.ts` from
 JSDoc via `tsc --emitDeclarationOnly`. Run before publishing to npm.
 
+## Framework decision (2026-10-10, ponytail review)
+
+**Docusaurus stays.** Evaluated MkDocs+mike (cleaner versioning — versions live
+in gh-pages branch, not source tree), VitePress, Starlight. Docusaurus wins:
+zero migration cost, theme/search/playground/JSDoc pipeline all working,
+versioning built-in. The versioning "mess" only materializes if we version
+often — policy below prevents that. Revisit only if the build becomes genuinely
+painful or versioning needs outgrow the built-in mechanism.
+
 ## How to cut a docs version
 
-**Only version on breaking API changes.** Do NOT version for every release.
+**Only version on breaking API changes (major versions).** Do NOT version for
+every release. Rationale: each version duplicates every file into
+`versioned_docs/` — the mess scales with frequency, not the mechanism.
 
 ```bash
 cd website
