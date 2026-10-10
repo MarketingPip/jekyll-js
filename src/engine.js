@@ -1728,6 +1728,8 @@ export class JekyllEngine {
         // /atom.xml even with `permalink: pretty` configured.
         const isHtmlOutput = ['.html', '.xhtml', '.htm'].includes(outExt);
         url = isPretty && isHtmlOutput ? `/${base}/` : `/${base}${outExt}`;
+        // FIX (nav-url): strip trailing /index — /docs/x/index/ → /docs/x/
+        url = url.replace(/\/index\/$/, '/');
       }
       return {
         ...attributes,
