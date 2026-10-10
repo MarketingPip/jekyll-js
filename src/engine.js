@@ -904,6 +904,7 @@ export class JekyllEngine {
       // FIX (generic date filter timezone): LiquidJS's `date` filter formats
       // in UTC. Real Jekyll uses local timezone. Override to use local.
       // Supports common strftime directives: %a %A %b %B %d %e %m %Y %y %H %I %M %S %p %z %Z %%
+      // Also supports %- flag for unpadded (e.g. %-d → 3, not 03)
       date: (input, format) => {
         let d;
         if (input instanceof Date) {
@@ -912,8 +913,13 @@ export class JekyllEngine {
           // 'now' or 'today' keywords
           if (input === 'now' || input === 'today') d = new Date();
           else d = parseLocalDate(input) || new Date(input);
+        } else if (input == null) {
+          return '';
         } else {
-          return this.liquidEngine.filters.date(input, format);
+          // For other types (e.g. Drop objects), try to get a date value
+          // Avoid infinite recursion: don't call this.liquidEngine.filters.date
+          const val = input.toString ? input.toString() : String(input);
+          d = parseLocalDate(val) || new Date(val);
         }
         if (!d || isNaN(d.getTime())) return input;
         if (!format) format = '%Y-%m-%d';
@@ -926,21 +932,24 @@ export class JekyllEngine {
         const sign = offset >= 0 ? '+' : '-';
         const offStr = sign + pad(Math.floor(Math.abs(offset) / 60)) + pad(Math.abs(offset) % 60);
         const hour12 = d.getHours() % 12 || 12;
-        return String(format).replace(/%([aAbBdeHImMpSyYZz%])/g, (m, c) => {
+        // Handle %- flag for unpadded values (e.g. %-d, %-m)
+        return String(format).replace(/%(-?)([aAbBdeHImMpSyYZz%])/g, (m, dash, c) => {
+          const unpadded = dash === '-';
+          const fmt = (n) => unpadded ? String(n) : pad(n);
           switch (c) {
             case 'a': return daysShort[d.getDay()];
             case 'A': return daysLong[d.getDay()];
             case 'b': return monthsShort[d.getMonth()];
             case 'B': return monthsLong[d.getMonth()];
-            case 'd': return pad(d.getDate());
+            case 'd': return fmt(d.getDate());
             case 'e': return String(d.getDate()).padStart(2, ' ');
-            case 'm': return pad(d.getMonth() + 1);
+            case 'm': return fmt(d.getMonth() + 1);
             case 'Y': return d.getFullYear();
             case 'y': return pad(d.getFullYear() % 100);
-            case 'H': return pad(d.getHours());
-            case 'I': return pad(hour12);
-            case 'M': return pad(d.getMinutes());
-            case 'S': return pad(d.getSeconds());
+            case 'H': return fmt(d.getHours());
+            case 'I': return fmt(hour12);
+            case 'M': return fmt(d.getMinutes());
+            case 'S': return fmt(d.getSeconds());
             case 'p': return d.getHours() < 12 ? 'AM' : 'PM';
             case 'z': return offStr;
             case 'Z': return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
