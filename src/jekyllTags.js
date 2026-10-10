@@ -402,7 +402,9 @@ function registerSeoTag(engine) {
       if (description) {
         const d = escapeHtml(stripHtml(description));
         lines.push(`<meta name="description" content="${d}" />`);
-        lines.push(`<meta property="og:description" content="${d}" />`);
+        // FIX (seo-tag quirk): real jekyll-seo-tag emits twitter:description
+        // with BOTH name and property attributes on the same tag
+        lines.push(`<meta name="twitter:description" property="og:description" content="${d}" />`);
       }
 
       // Canonical URL and og:url

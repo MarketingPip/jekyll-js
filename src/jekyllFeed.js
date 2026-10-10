@@ -167,7 +167,7 @@ export async function generateFeeds(engine) {
     const html = await engine.renderTemplate(minifiedTemplate, {
       site: siteCtx,
       page,
-      jekyll: { version: '4.3.4' },
+      jekyll: { version: '4.4.1' },
     });
     return {
       path: page.url.slice(1), // 'feed.xml' (no leading slash)

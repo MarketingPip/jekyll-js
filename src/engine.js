@@ -2009,7 +2009,7 @@ export class JekyllEngine {
       // `if jekyll.environment == "production"`. Mirrors _renderPage.
       jekyll: {
         environment: this.options.environment || 'development',
-        version: '4.3.4',
+        version: '4.4.1',
       },
     };
   }
@@ -2301,7 +2301,7 @@ export class JekyllEngine {
       // `options.environment` to the constructor to override.
       jekyll: {
         environment: this.options.environment || 'development',
-        version: '4.3.4',
+        version: '4.4.1',
       },
     };
     // FIX (pagination was entirely unimplemented): exposes `paginator`
@@ -2559,7 +2559,7 @@ export class JekyllEngine {
         },
         jekyll: {
           environment: this.options.environment || 'development',
-          version: '4.3.4',
+          version: '4.4.1',
         },
       };
       let sassSource = assetBody;
