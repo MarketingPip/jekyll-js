@@ -18,7 +18,22 @@
  *   to_integer -- LiquidJS returns floats unchanged; Jekyll truncates to int
  */
 
-import { TokenKind } from 'liquidjs';
+import { TokenKind, Context } from 'liquidjs';
+
+// ─── Ruby Liquid string-indexing parity ─────────────────────────────────────
+// Ruby Liquid (variable_lookup.rb): a String does not respond to `key?` or
+// `fetch`, so `"str"[0]` is nil. LiquidJS does JS string indexing
+// (`"str"[0]` → `"s"`), which is truthy. This breaks
+// `{% if imginfo[0] %}` guards on string values (beautiful-jekyll header).
+const _liquidReadProperty = Context.prototype.readProperty;
+Context.prototype.readProperty = function (obj, key) {
+  if (typeof obj === 'string') {
+    if (typeof key === 'number' || (typeof key === 'string' && /^-?\d+$/.test(key))) {
+      return undefined;
+    }
+  }
+  return _liquidReadProperty.call(this, obj, key);
+};
 
 // NOTE: highlight.js is NOT imported here. It is an optional plugin (~1.5MB
 // for the full language build): the caller passes the highlighter into
@@ -66,43 +81,57 @@ function registerHighlightTag(engine, highlighter) {
       const rawCode = this.tokens
         .map((t) => (typeof t.getText === 'function' ? t.getText() : t.value ?? ''))
         .join('');
-      const code = rawCode.replace(/^\n/, '').replace(/\n$/, '');
+      // Jekyll::Tags::Highlight#render: strips ALL leading/trailing \r and \n.
+      const code = rawCode.replace(/^[\r\n]+/, '').replace(/[\r\n]+$/, '');
 
+      if (!highlighter || typeof highlighter.highlight !== 'function') {
+        throw new Error(
+          `{% highlight %} used but no syntax highlighter was provided. ` +
+            `Pass one via \`new JekyllEngine({ highlighter })\` — ` +
+            `e.g. \`import rougeAdapter from 'jekyll-js/adapters/highlight-rouge'\`.`
+        );
+      }
       let highlighted;
       try {
-        if (!highlighter) {
-          throw new Error(
-            `{% highlight %} used but no syntax highlighter was provided. ` +
-              `Pass one via \`new JekyllEngine({ highlighter })\` — ` +
-              `\`import hljs from 'highlight.js'\` in Node, or load ` +
-              `dist/highlight-plugin.js (sets window.JekyllHighlight) in the browser.`
-          );
+        // Rouge-compat adapter: highlight(code, lang) returns inner HTML;
+        // supports(lang) gates the language. (Jekyll 4.3.4 highlight.rb
+        // render_rouge: Lexer.find_fancy(@lang, code) || PlainText.)
+        const supported = typeof highlighter.supports === 'function'
+          ? highlighter.supports(this.lang)
+          : true;
+        if (supported) {
+          highlighted = await highlighter.highlight(code, this.lang);
         }
-        const lang = this.lang === 'plaintext' ? 'text' : this.lang;
-        if (highlighter.getLanguage(lang)) {
-          highlighted = highlighter.highlight(code, { language: lang, ignoreIllegals: true }).value;
-        } else {
-          highlighted = escapeHtml(code);
-        }
+        if (highlighted == null) highlighted = escapeHtml(code);
       } catch (err) {
-        // A missing-highlighter error is honest: rethrow it. Anything else
-        // (bad language grammar, etc.) degrades to escaped plain text.
-        if (/no syntax highlighter was provided/.test(err.message)) throw err;
         highlighted = escapeHtml(code);
       }
+      // Jekyll::Tags::Highlight#add_code_tag: "#{code.chomp}" — one trailing
+      // line break removed from the FINAL output. For non-linenos that's the
+      // highlighted code; for linenos, Rouge's HTMLTable ensures the code
+      // cell ends with \n (and gutter numbers end with \n).
+      let highlightedStr = String(highlighted);
+      if (!this.linenos) {
+        highlightedStr = highlightedStr.replace(/(\r\n|\n|\r)$/, '');
+      } else if (!/(\r\n|\n|\r)$/.test(highlightedStr)) {
+        highlightedStr += '\n';
+      }
+      highlighted = highlightedStr;
 
-      const langClass = `language-${this.lang}`;
+      // Jekyll: "language-#{@lang.to_s.tr("+", "-")}" (e.g. c++ → c--).
+      const langClass = `language-${this.lang.replace(/\+/g, '-')}`;
       let inner;
       if (this.linenos) {
-        // FIX (linenos parsed but ignored): mirror Rouge's linenos table
-        // shape so themes' syntax stylesheets actually apply.
-        const lineCount = highlighted.split('\n').length;
-        const numbers = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n');
+        // Jekyll 4.3.4 highlight.rb passes gutter_class: "gutter",
+        // code_class: "code" to Rouge's HTMLTable (plus hardcoded "gl").
+        // Rouge's HTMLTable: numbers are "1\n2\n...\n" (trailing newline).
+        const lineCount = code.split('\n').length;
+        const numbers = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n') + '\n';
         inner =
           `<code class="${langClass}" data-lang="${this.lang}">` +
           `<table class="rouge-table"><tbody><tr>` +
-          `<td class="rouge-gutter gl"><pre class="lineno">${numbers}</pre></td>` +
-          `<td class="rouge-code"><pre>${highlighted}</pre></td>` +
+          `<td class="gutter gl"><pre class="lineno">${numbers}</pre></td>` +
+          `<td class="code"><pre>${highlighted}</pre></td>` +
           `</tr></tbody></table></code>`;
       } else {
         inner = `<code class="${langClass}" data-lang="${this.lang}">${highlighted}</code>`;
@@ -528,18 +557,88 @@ function registerFeedMetaTag(engine) {
 }
 
 // ─── remaining plugin stub tags ─────────────────────────────────────────────
-// {% gist %} embeds an external GitHub Gist via <script src>; there's
-// nothing meaningful to render without making a real network call, so this
-// one really is left as a documented no-op.
-function registerPluginStubs(engine) {
+// {% gist %} embeds a GitHub Gist. Mirrors jekyll-gist 1.5.0
+// (lib/jekyll-gist/gist_tag.rb): fetches the raw gist for the <noscript>
+// fallback (3s timeout, network failure → no noscript, matching Ruby's
+// rescue → nil), always emits the <script> tag. Verified byte-identical
+// vs real Jekyll 4.3.4 output 2026-10-11.
+function registerGistTag(engine) {
   engine.registerTag('gist', {
-    parse() {},
-    render() { return ''; },
+    parse(tagToken) {
+      this.markup = tagToken.args || '';
+    },
+    async render(ctx) {
+      // Ruby: determine_arguments — /\A([\S]+|.*(?=\/).+)\s?(\S*)\Z/
+      const input = (this.markup || '').trim();
+      const m = input.match(/^(\S+|.*(?=\/).+)\s?(\S*)$/);
+      if (!m) {
+        throw new Error(
+          `Syntax error in tag 'gist' while parsing the following markup:\n\n    ${this.markup}\n\n  Valid syntax:\n    {% gist user/1234567 %}\n    {% gist user/1234567 foo.js %}`
+        );
+      }
+      let gistId = m[1].trim();
+      let filename = m[2].trim();
+      // Ruby: if the id/filename is a Liquid variable, resolve it
+      try {
+        const v = ctx.get([gistId]);
+        if (v != null && typeof v !== 'object') gistId = String(v);
+      } catch {}
+      try {
+        const v = ctx.get([filename]);
+        if (v != null && typeof v !== 'object') filename = String(v);
+      } catch {}
+
+      const scriptTag =
+        `<script src="https://gist.github.com/${gistId}.js${filename ? `?file=${filename}` : ''}"> </script>`;
+
+      // Ruby: gist_noscript_tag — skipped if site.gist.noscript == false
+      let noscriptTag = '';
+      let skipNoscript = false;
+      try {
+        const site = ctx.get(['site']);
+        if (site && site.gist && site.gist.noscript === false) skipNoscript = true;
+      } catch {}
+      if (!skipNoscript) {
+        try {
+          const url = `https://gist.githubusercontent.com/${gistId}/raw${filename ? `/${filename}` : ''}`;
+          const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+          // Ruby uses response.body regardless of status (404 body → "404: Not Found")
+          const code = await resp.text();
+          const escaped = code
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+          noscriptTag = `<noscript><pre>${escaped}</pre></noscript>`;
+        } catch {
+          // Network failure → no noscript (Ruby rescues to nil)
+        }
+      }
+      return noscriptTag + scriptTag;
+    },
   });
+}
+
+function registerPluginStubs(engine) {
+  registerGistTag(engine);
 }
 
 // ─── filter fixes ───────────────────────────────────────────────────────────
 function registerFilterFixes(engine) {
+  // FIX: Ruby Liquid's truncatewords returns the input UNCHANGED (newlines
+  // preserved) when word count <= limit, and appends "..." only when
+  // wordlist.length > words. LiquidJS always splits/joins (collapsing
+  // newlines) and uses >= for the ellipsis (off-by-one).
+  engine.registerFilter('truncatewords', (input, words = 15, truncateString = '...') => {
+    if (input == null) return '';
+    const str = String(input);
+    const wordlist = str.split(/\s+/).filter((w) => w.length > 0);
+    let limit = parseInt(words, 10);
+    if (isNaN(limit)) limit = 15;
+    if (wordlist.length <= limit) return str;
+    return wordlist.slice(0, limit).join(' ') + String(truncateString);
+  });
+
   // FIX: LiquidJS's to_integer passes floats through unchanged. Jekyll (Ruby)
   // calls `.to_i` which truncates toward zero. Verified against oracle:
   //   1.9.to_i → 1,  -1.9.to_i → -1,  true.to_i → 1,  false.to_i → 0

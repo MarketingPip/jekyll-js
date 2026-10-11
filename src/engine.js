@@ -19,7 +19,7 @@ import { registerJekyllExtensions } from './jekyllTags.js';
 import { preprocessConditionals } from './liquidPreprocess.js';
 import { isSassAsset, compileSassAsset } from './assetsPipeline.js';
 import { isFeedEnabled, generateFeeds } from './jekyllFeed.js';
-import { isSitemapEnabled, generateSitemap } from './jekyllSitemap.js';
+import { isSitemapEnabled, generateSitemap, generateRobotsTxt } from './jekyllSitemap.js';
 import { redirectFromPlugin } from './jekyllRedirectFrom.js';
 
 // Check if jekyll-redirect-from is enabled via plugins config
@@ -27,6 +27,64 @@ function isRedirectFromEnabled(config) {
   const plugins = config?.plugins || config?.gems || [];
   const list = Array.isArray(plugins) ? plugins : [plugins];
   return list.some((p) => p === 'jekyll-redirect-from' || p === 'jekyll_redirect_from');
+}
+
+// FIX (collection doc categories/tags parity): mirrors Jekyll's
+// Document#populate_categories / #populate_tags (document.rb:438-455).
+// Every document gets array-valued `categories` and `tags`:
+// - String `categories:` is whitespace-split at merge time
+//   (merge_categories!); singular `category:` is appended (not split)
+//   and takes precedence in pluralized_array_from_hash.
+// - Singular `tag:` is appended (not split); String `tags:` is
+//   whitespace-split (value_from_plural_key).
+// - Categories: mapped to String, flattened, uniq'd.
+// - Tags: flattened, compacted (nil removed).
+function populateDocTaxonomy(doc) {
+  // Categories: Array(data["categories"]) + pluralized_array_from_hash.
+  // Note: merge_categories! already split String categories, but we
+  // handle it here too for docs that bypass merge_data!.
+  let cats = [];
+  const rawCats = doc.categories;
+  if (typeof rawCats === 'string') {
+    cats.push(...rawCats.split(/\s+/).filter(Boolean));
+  } else if (Array.isArray(rawCats)) {
+    cats.push(...rawCats);
+  } else if (rawCats != null) {
+    cats.push(rawCats);
+  }
+  // pluralized_array_from_hash(data, "category", "categories"):
+  // singular "category" takes precedence; NOT split.
+  if (doc.category != null) {
+    const v = Array.isArray(doc.category) ? doc.category : [doc.category];
+    cats.push(...v);
+  } else if (typeof doc.categories === 'string') {
+    // Singular absent, plural was String (already split above) -- no-op.
+  }
+  // map to String, flatten, uniq (Ruby: map!(&:to_s), flatten!, uniq!)
+  cats = [...new Set(cats.flat().map((c) => String(c)))];
+  doc.categories = cats;
+
+  // Tags: pluralized_array_from_hash(data, "tag", "tags"), flatten.
+  // Singular "tag" NOT split; plural "tags" String IS split.
+  let tags = [];
+  if (doc.tag != null) {
+    const v = Array.isArray(doc.tag) ? doc.tag : [doc.tag];
+    tags.push(...v);
+  } else if (doc.tags != null) {
+    const rawTags = doc.tags;
+    if (typeof rawTags === 'string') {
+      tags.push(...rawTags.split(/\s+/).filter(Boolean));
+    } else if (Array.isArray(rawTags)) {
+      tags.push(...rawTags);
+    } else {
+      tags.push(rawTags);
+    }
+  }
+  // flatten, compact (Ruby: flatten!, compact! via pluralized_array_from_hash)
+  tags = tags.flat().filter((t) => t != null);
+  doc.tags = tags;
+
+  return doc;
 }
 
 const noop = () => {};
@@ -39,6 +97,46 @@ const DEFAULT_EXCLUDES = [
   'vendor/bundle/', 'vendor/cache/', 'vendor/gems/', 'vendor/ruby/',
 ];
 const DEFAULT_INCLUDES = ['.htaccess'];
+
+// FIX (EntryFilter parity -- globs, special entries): Ruby's
+// File.fnmatch called WITHOUT flags (as Jekyll's entry_filter.rb does)
+// lets `*` and `?` match ANY character including `/`, supports `[...]`
+// classes and `{a,b}` alternation, and anchors the full string.
+// minimatch-style semantics (where `*` stops at `/`) are NOT equivalent.
+const _fnmatchRegexCache = new Map();
+function fnmatchToRegExp(pattern) {
+  let cached = _fnmatchRegexCache.get(pattern);
+  if (cached) return cached;
+  let re = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === '*') re += '.*';
+    else if (c === '?') re += '.';
+    else if (c === '[') {
+      let j = i + 1;
+      let cls = '[';
+      if (pattern[j] === '!') { cls += '^'; j++; }
+      if (pattern[j] === ']') { cls += '\\]'; j++; }
+      while (j < pattern.length && pattern[j] !== ']') {
+        cls += pattern[j] === '\\' ? '\\\\' : pattern[j];
+        j++;
+      }
+      re += cls + ']'; i = j;
+    } else if (c === '{') {
+      const j = pattern.indexOf('}', i);
+      if (j === -1) re += '\\{';
+      else {
+        re += '(?:' + pattern.slice(i + 1, j).split(',')
+          .map((alt) => alt.replace(/\*/g, '.*').replace(/\?/g, '.')).join('|') + ')';
+        i = j;
+      }
+    } else if ('\\.^$+()|'.includes(c)) re += '\\' + c;
+    else re += c;
+  }
+  cached = new RegExp('^(?:' + re + ')$', 's');
+  _fnmatchRegexCache.set(pattern, cached);
+  return cached;
+}
 
 /** Deep-merge two plain objects (override wins); mirrors Jekyll's Utils.deep_merge_hashes. */
 function deepMerge(base, override) {
@@ -79,6 +177,19 @@ function titleizeSlug(slug) {
   return String(slug)
     .split(/[-_\s]+/)
     .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
+// FIX (populate_title parity -- document.rb#populate_title): real Jekyll
+// runs populate_title on EVERY document (not just posts):
+// data["title"] ||= Utils.titleize_slug(slug) where titleize_slug is
+// slug.split("-").map(&:capitalize).join(" ") (utils.rb) and slug/ext come
+// from DATE_FILENAME_MATCHER / DATELESS_FILENAME_MATCHER (falling back to
+// basename_without_ext), with data["slug"]/data["ext"] assigned too.
+function titleizeSlugExact(slug) {
+  return String(slug)
+    .split('-')
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
     .join(' ');
 }
 
@@ -821,8 +932,25 @@ export class JekyllEngine {
       toc_levels: [1, 2, 3, 4, 5, 6],
       smart_quotes: ['lsquo', 'rsquo', 'ldquo', 'rdquo'],
       typographer: true,
+      guess_lang: true, // Jekyll's default kramdown config (configuration.rb)
     };
     const kramdownOpts = { ...kramdownDefaults, ...(this._config?.kramdown || {}) };
+    // FIX (kramdown highlighter setup): mirror Jekyll's
+    // Converters::Markdown::KramdownParser#setup (jekyll 4.3.4,
+    // lib/jekyll/converters/markdown/kramdown_parser.rb):
+    //   @config["syntax_highlighter"] ||= highlighter        (site highlighter, default "rouge")
+    //   @config["syntax_highlighter_opts"] ||= {}
+    //   @config["syntax_highlighter_opts"]["default_lang"] ||= "plaintext"
+    //   @config["syntax_highlighter_opts"]["guess_lang"] = @config["guess_lang"]
+    // Without default_lang="plaintext", plain `code` spans miss the
+    // `language-plaintext highlighter-rouge` class real Jekyll emits.
+    if (kramdownOpts.syntax_highlighter === undefined) {
+      kramdownOpts.syntax_highlighter = this._config?.highlighter || 'rouge';
+    }
+    const sho = { ...(kramdownOpts.syntax_highlighter_opts || {}) };
+    if (sho.default_lang === undefined) sho.default_lang = 'plaintext';
+    if (sho.guess_lang === undefined) sho.guess_lang = kramdownOpts.guess_lang;
+    kramdownOpts.syntax_highlighter_opts = sho;
     const result = renderer.render(String(src), kramdownOpts);
     // Support async renderers: if Promise, throw helpful error
     // (use async build methods for async renderers)
@@ -993,7 +1121,7 @@ export class JekyllEngine {
         const offStr = sign + pad(Math.floor(Math.abs(offset) / 60)) + pad(Math.abs(offset) % 60);
         const hour12 = parts.hours % 12 || 12;
         // Handle %- flag for unpadded values (e.g. %-d, %-m)
-        return String(format).replace(/%(-?)([aAbBdeHImMpSyYZz%])/g, (m, dash, c) => {
+        return String(format).replace(/%(-?)([aAbBdeHImMpSsyYZz%])/g, (m, dash, c) => {
           const unpadded = dash === '-';
           const fmt = (n) => unpadded ? String(n) : pad(n);
           switch (c) {
@@ -1010,6 +1138,7 @@ export class JekyllEngine {
             case 'I': return fmt(hour12);
             case 'M': return fmt(parts.minutes);
             case 'S': return fmt(parts.seconds);
+            case 's': return String(Math.floor(d.getTime() / 1000)); // epoch (tz-independent)
             case 'p': return parts.hours < 12 ? 'AM' : 'PM';
             case 'z': return offStr;
             case 'Z': return siteTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || '';
@@ -1308,6 +1437,19 @@ export class JekyllEngine {
       }
     }
     this._collectionsConfig = normalizeCollectionsConfig(this._config.collections);
+    // FIX (EntryFilter dir rule): the trailing-slash directory form of an
+    // exclude pattern ("node_modules/") needs to know whether a level path
+    // is a directory. Precompute every ancestor directory of the VFS keys.
+    this._vfsDirs = new Set();
+    for (const key of Object.keys(vfs)) {
+      const parts = String(key).split('/');
+      for (let i = 1; i < parts.length; i++) {
+        this._vfsDirs.add(parts.slice(0, i).join('/'));
+      }
+    }
+    this._collectionDirNames = new Set(
+      Object.keys(this._collectionsConfig).map((name) => `_${name}`)
+    );
 
     // FIX (exclude/include config): Jekyll's `exclude:` (with defaults from
     // configuration.rb) skips files/dirs; `include:` forces inclusion,
@@ -1325,7 +1467,24 @@ export class JekyllEngine {
         path === '_config.yml' || path === '_config.yaml' ||
         path.startsWith('_layouts/') || path.startsWith('_includes/') ||
         path.startsWith('_data/') || path.startsWith('_sass/');
-      if (!isInfrastructure && this._isExcluded(path)) {
+      // FIX (EntryFilter parity -- entry_filter.rb + reader.rb): Jekyll
+      // rejects every directory entry starting with `_` (also `.`, `#`,
+      // `~`, or ending with `~`) at each level of the walk, so unknown
+      // underscore dirs like _javascript/ are NEVER pages or static files.
+      // Directly-read locations (_posts, _drafts, declared collections)
+      // bypass the filter for their own segment but their INNER files are
+      // still filtered per level (so `exclude: [_posts]` works via the
+      // prefix rule). _plugins/ (loaded as code by plugin_manager.rb) and
+      // _site/ are never emitted at all.
+      const segs = String(path).split('/');
+      if (segs.includes('_plugins') || segs.includes('_site')) continue;
+      const magicIdx = segs.findIndex((s) =>
+        s === '_posts' || s === '_drafts' || this._collectionDirNames.has(s)
+      );
+      // Theme-dir layouts (e.g. `chirpy/_layouts/default.html`) are read
+      // directly like site _layouts/ (cf. layout_reader.rb#theme_layout_entries).
+      const isThemeLayout = path.indexOf('/_layouts/') !== -1;
+      if (!isInfrastructure && !isThemeLayout && this._isExcluded(path, magicIdx === -1 ? 0 : magicIdx + 1)) {
         continue;
       }
 
@@ -1485,7 +1644,25 @@ export class JekyllEngine {
           // back from front matter to the filename (DATE_FILENAME_MATCHER)
           // to site.time. parsePostFilename covers the dated-filename case.
           const fileBase = relPath.slice(relPath.lastIndexOf('/') + 1);
-          const docDate = attributes.date || parsePostFilename(fileBase)?.date || new Date();
+          // FIX (Document#date site.time fallback): real Jekyll's Document#date
+          // is `data["date"] ||= site.time` (document.rb) -- undated docs date
+          // to the build time, never to the wall clock at scan time.
+          const siteTime = this._config.time ? new Date(this._config.time) : new Date();
+          const docDate = attributes.date || parsePostFilename(fileBase)?.date || siteTime;
+          // FIX (populate_title parity -- document.rb): slug/ext/title for
+          // collection docs, exactly like posts get. Tabs rely on the
+          // titleized slug for <title> and the sidebar nav labels.
+          const datedSlugMatch = relPath.match(/(\d{2,4}-\d{1,2}-\d{1,2})-([^/]*)(\.[^.]+)$/);
+          let docSlug, docExt;
+          if (datedSlugMatch) {
+            docSlug = datedSlugMatch[2];
+            docExt = datedSlugMatch[3];
+          } else {
+            const m = fileBase.match(/^(.*)(\.[^.]+)$/);
+            docSlug = m ? m[1] : fileBase;
+            docExt = m ? m[2] : '';
+          }
+          docSlug = docSlug.replace(/\.*$/, '');
           const permalink = generateCollectionPermalink(
             attributes,
             collectionName,
@@ -1497,15 +1674,25 @@ export class JekyllEngine {
             docDate
           );
           this._collections[collectionName] ||= [];
-          this._collections[collectionName].push({
-            path,
-            content,
-            ...attributes,
-            _body: body,
-            _permalink: permalink,
-            _relPath: relPath,
-            _date: docDate,
-          });
+          this._collections[collectionName].push(
+            // FIX (collection doc taxonomy parity): every document gets
+            // array-valued categories/tags (Document#populate_categories/
+            // #populate_tags). Applied at scan time.
+            populateDocTaxonomy({
+              path,
+              content,
+              ...attributes,
+              // FIX (populate_title parity): titleized slug fallback (and
+              // slug/ext) for collection docs, like Document#read_post_data.
+              title: attributes.title || titleizeSlugExact(docSlug),
+              slug: attributes.slug || docSlug,
+              ext: attributes.ext || docExt,
+              _body: body,
+              _permalink: permalink,
+              _relPath: relPath,
+              _date: docDate,
+            })
+          );
         } catch (e) {
           // As above: YAML is handled by _parseFrontMatter; this is the
           // safety net for unexpected failures during doc assembly.
@@ -1594,37 +1781,28 @@ export class JekyllEngine {
         // underscore-prefixed files) must not be tracked as a static
         // file at all, matching real Jekyll's site.static_files.
         if (path.startsWith('_sass/')) continue;
-        const slashIdx = path.lastIndexOf('/');
-        const name = slashIdx === -1 ? path : path.slice(slashIdx + 1);
-        const extname = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
-        const basename = extname ? name.slice(0, -extname.length) : name;
-        this._staticFiles.push({
-          name,
-          extname,
-          basename,
-          path: `/${path}`,
-          modified_time: new Date(),
-        });
+        this._trackStaticFile(path);
         continue;
       }
       // FIX (FM-less .md): Files with convertible extensions (.md, .html, etc.)
       // but WITHOUT front matter are static files in Jekyll (copied as-is,
       // not rendered). Previously they were dropped.
+      // FIX (_sass/ never emitted): _sass/ is Jekyll infrastructure
+      // (entry_filter.rb) -- FM-less .md files under it (e.g.
+      // just-the-docs _sass/README.md) must not be tracked as static files.
       {
-        const slashIdx = path.lastIndexOf('/');
-        const name = slashIdx === -1 ? path : path.slice(slashIdx + 1);
-        const extname = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
-        const basename = extname ? name.slice(0, -extname.length) : name;
-        this._staticFiles.push({
-          name,
-          extname,
-          basename,
-          path: `/${path}`,
-          modified_time: new Date(),
-        });
+        if (path.startsWith('_sass/')) continue;
+        this._trackStaticFile(path);
         continue;
       }
     }
+
+    // FIX (read_included_excludes parity -- reader.rb): after the filtered
+    // walk, Jekyll re-reads every `include:` FILE directly, so `include:`
+    // resurrects files living under excluded directories (or rejected as
+    // special). Directories in `include:` are skipped (they were already
+    // traversed when they survived the filter).
+    this._readIncludedExcludes(vfs);
 
     // FIX (same-date ordering): Ruby's Document#<=> tie-breaks by path
     // when dates are equal. Without this, same-date posts order randomly.
@@ -1639,15 +1817,70 @@ export class JekyllEngine {
       });
     }
 
-    // FIX (collection docs were unsorted): real Jekyll's Collection#read
-    // ends with sort_docs! -> Document#<=> (date ascending, path
-    // tie-break). Undated docs compare equal (Jekyll falls back to
-    // site.time for all of them), so the path tie-break decides there.
-    const now = Date.now();
+    // FIX (sort_docs! parity -- collection.rb): real Jekyll's Collection#read
+    // ends with sort_docs!: an `order:` array rearranges docs explicitly;
+    // a `sort_by:` string sorts by that front-matter key (nil values warn
+    // and sort last; ties fall back to Document#<=>); otherwise docs.sort!
+    // (Document#<=>: date ascending, path tie-break; a nil date only ties
+    // another nil date -- nil vs a real date falls through to the path).
+    const toMs = (v) => {
+      if (v == null) return null;
+      const t = new Date(v).getTime();
+      return Number.isNaN(t) ? null : t;
+    };
+    const docCompare = (a, b) => {
+      const da = toMs(a._date);
+      const db = toMs(b._date);
+      let cmp = null;
+      if (da !== null && db !== null) cmp = da < db ? -1 : da > db ? 1 : 0;
+      else if (da === null && db === null) cmp = 0;
+      if (cmp === null || cmp === 0) {
+        cmp = a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+      }
+      return cmp;
+    };
     for (const [name, pages] of Object.entries(this._collections)) {
       if (name === 'posts') continue;
-      const t = (p) => (p._date ? new Date(p._date).getTime() : now);
-      pages.sort((a, b) => t(a) - t(b) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      const meta = this._collectionsConfig[name] || {};
+      if (Array.isArray(meta.order)) {
+        // rearrange_docs!: listed docs first in listed order, then the rest
+        // in relative-path order.
+        const table = new Map(
+          [...pages]
+            .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+            .map((p) => [p.path, p])
+        );
+        const rearranged = [];
+        for (const entry of meta.order) {
+          const key = `_${name}/${entry}`;
+          if (table.has(key)) {
+            rearranged.push(table.get(key));
+            table.delete(key);
+          }
+        }
+        for (const p of table.values()) rearranged.push(p);
+        this._collections[name] = rearranged;
+      } else if (typeof meta.sort_by === 'string') {
+        // sort_docs_by_key!
+        const sortKey = meta.sort_by;
+        const mapped = pages.map((doc) => [doc[sortKey], doc]);
+        mapped.sort(([av, a], [bv, b]) => {
+          let order = null;
+          if (av == null && bv == null) order = 0;
+          else if (av == null) {
+            this.options.logger(`Sort warning: '${sortKey}' not defined in ${a.path}`, 'warn');
+            order = 1;
+          } else if (bv == null) {
+            this.options.logger(`Sort warning: '${sortKey}' not defined in ${b.path}`, 'warn');
+            order = -1;
+          } else order = av < bv ? -1 : av > bv ? 1 : 0;
+          if (order === null || order === 0) return docCompare(a, b);
+          return order;
+        });
+        this._collections[name] = mapped.map(([, doc]) => doc);
+      } else {
+        pages.sort(docCompare);
+      }
     }
 
     return this;
@@ -1703,20 +1936,97 @@ export class JekyllEngine {
    * `exclude:` config (defaults + user)? `include:` overrides.
    * Matches exact paths and anything under an excluded directory.
    */
-  _isExcluded(path) {
-    const matches = (list) => list.some((entry) => {
-      const normalized = String(entry).replace(/\/$/, '');
-      return path === normalized || path.startsWith(normalized + '/');
-    });
-    // include wins over exclude
-    if (matches(this._includeList || [])) return false;
-    // FIX (dotfile exclusion): Jekyll's EntryFilter excludes dotfiles
-    // (e.g. .gitignore, .github/) unless explicitly in `include`.
-    const segments = String(path).split('/');
-    if (segments.some((seg) => seg.startsWith('.') && seg !== '.' && seg !== '..')) {
-      return true;
+  /**
+   * Jekyll parity (entry_filter.rb#filter): is this VFS path rejected by
+   * the entry filter? Evaluated per directory level, mirroring how
+   * reader.rb filters each directory's basenames during the walk:
+   *   - a level whose basename `include:`-matches passes (include wins
+   *     over both exclude and special);
+   *   - a level whose source-relative path `exclude:`-matches (minus
+   *     `include:` entries, i.e. `site.exclude - site.include`) is rejected;
+   *   - otherwise a level whose basename is special (starts with `.`,
+   *     `_`, `#`, `~`) or a backup (ends with `~`) is rejected.
+   * `skipLevels` exempts leading directly-read segments (_posts, _drafts,
+   * collection dirs) -- their inner files are still filtered per level.
+   */
+  _isExcluded(path, skipLevels = 0) {
+    const includeList = this._includeList || [];
+    // Jekyll: site.exclude - site.include (exact array difference)
+    const excludeList = (this._excludeList || []).filter((e) => !includeList.includes(e));
+    const segs = String(path).split('/');
+    for (let i = skipLevels; i < segs.length; i++) {
+      const entry = segs[i];
+      if (entry === '' || entry === '.') continue;
+      const levelPath = segs.slice(0, i + 1).join('/');
+      // include: matched against the level's basename (EntryFilter#included?)
+      if (this._globInclude(includeList, entry, false)) continue;
+      // exclude: matched against the source-relative level path (EntryFilter#excluded?)
+      if (this._globInclude(excludeList, levelPath, this._vfsDirs.has(levelPath))) return true;
+      // special leading chars or backup suffix (EntryFilter#special?/#backup?)
+      if (/^[._#~]/.test(entry) || entry.endsWith('~')) return true;
     }
-    return matches(this._excludeList || []);
+    return false;
+  }
+
+  /**
+   * Jekyll parity (entry_filter.rb#glob_include?): does `entry`
+   * (source-relative, no leading slash) match any pattern in `list`?
+   * Ruby's File.fnmatch with NO flags (`*`/`?` cross `/`), OR a plain
+   * string-prefix match, OR the trailing-slash directory rule
+   * (`"node_modules/"` matches the directory itself).
+   */
+  _globInclude(list, entry, entryIsDirectory) {
+    if (!list || list.length === 0) return false;
+    const joinSource = (p) => `/__jekyll_source__/${String(p).replace(/^\/+/, '')}`;
+    const entryWithSource = joinSource(entry);
+    return list.some((pattern) => {
+      if (pattern instanceof RegExp) return pattern.test(entryWithSource);
+      if (typeof pattern !== 'string' || pattern === '') return false;
+      const patternWithSource = joinSource(pattern);
+      if (fnmatchToRegExp(patternWithSource).test(entryWithSource)) return true;
+      if (entryWithSource.startsWith(patternWithSource)) return true;
+      if (entryIsDirectory && patternWithSource === `${entryWithSource}/`) return true;
+      return false;
+    });
+  }
+
+  /** Track a static file (Jekyll's StaticFileReader entry shape). */
+  _trackStaticFile(path) {
+    const slashIdx = path.lastIndexOf('/');
+    const name = slashIdx === -1 ? path : path.slice(slashIdx + 1);
+    const extname = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
+    const basename = extname ? name.slice(0, -extname.length) : name;
+    this._staticFiles.push({
+      name,
+      extname,
+      basename,
+      path: `/${path}`,
+      modified_time: new Date(),
+    });
+  }
+
+  /**
+   * Jekyll parity (reader.rb#read_included_excludes): after the filtered
+   * walk, every `include:` entry that is a FILE in the source is read
+   * directly -- as a page when it carries front matter, else as a static
+   * file -- unless it was already ingested. This is how `include:`
+   * resurrects files under excluded directories.
+   */
+  _readIncludedExcludes(vfs) {
+    for (const entry of this._includeList || []) {
+      if (typeof entry !== 'string' || entry === '') continue;
+      const p = entry.replace(/^\/+/, '');
+      if (this._vfsDirs.has(p)) continue; // directories are never re-read
+      const content = vfs[p];
+      if (content === undefined) continue;
+      if (this._rootPages.some((pg) => pg.path === p)) continue;
+      if (this._staticFiles.some((f) => f.path === `/${p}`)) continue;
+      const contentStr = Buffer.isBuffer(content) ? '' : String(content);
+      const hasFrontMatter =
+        contentStr.startsWith('---\n') || contentStr.startsWith('---\r\n');
+      if (hasFrontMatter) this._rootPages.push({ path: p, content });
+      else this._trackStaticFile(p);
+    }
   }
 
   _parseFrontMatter(path, content, type = null) {
@@ -2035,6 +2345,26 @@ export class JekyllEngine {
     // resolved url ends with ".html" or with "/".
     const htmlPages = pages.filter((p) => p.url.endsWith('.html') || p.url.endsWith('/'));
 
+    // FIX (site.collections was entirely unimplemented): real Jekyll's
+    // SiteDrop#collections returns collections sorted by label (drops/
+    // site_drop.rb:37-39). Templates like minimal-mistakes' lunr-store.js
+    // iterate site.collections -> c.docs. The per-name arrays (site.posts,
+    // site.pets, ...) are still spread below for direct access.
+    // NOTE (posts docs order): Jekyll's Collection#docs is date-ASCENDING
+    // (Document#<=> via docs.sort!), while site.posts is explicitly
+    // reversed (SiteDrop#posts: docs.sort { |a,b| b <=> a }).
+    // _collections.posts is stored descending (for site.posts), so
+    // reverse it here for the collection view.
+    const collectionsList = Object.keys(mappedCollections)
+      .sort()
+      .map((name) => ({
+        label: name,
+        docs:
+          name === 'posts'
+            ? [...mappedCollections[name]].reverse()
+            : mappedCollections[name],
+      }));
+
     return {
       site: {
         ...this._config,
@@ -2048,6 +2378,7 @@ export class JekyllEngine {
         html_pages: htmlPages, // FIX (site.html_pages)
         static_files: this._staticFiles, // FIX (site.static_files)
         related_posts: relatedPosts, // FIX (site.related_posts)
+        collections: collectionsList, // FIX (site.collections, sorted by label)
         ...mappedCollections,
         // FIX (site.documents was entirely unimplemented): real Jekyll's
         // Site#documents is every doc in every collection (posts included,
@@ -2315,6 +2646,11 @@ export class JekyllEngine {
     const postFields =
       isPost && postMeta
         ? {
+            // FIX (page.title empty on collection docs): the scan-time
+            // postMeta carries the populate_title-resolved title
+            // (front matter wins, else titleized slug); _parseFrontMatter
+            // attributes alone don't have it for docs without `title:`.
+            title: postMeta.title,
             date: postMeta._date,
             // FIX (minimal-mistakes #6): prefer the fully rendered excerpt
             // (Liquid-rendered + markdown-converted, computed by
@@ -2646,7 +2982,8 @@ export class JekyllEngine {
         sassSource,
         this.vfsTemplates,
         this._config,
-        this.options.sass
+        this.options.sass,
+        this.options.environment || 'development'
       );
       // FIX (silent Sass failures): the compile error used to hide inside
       // a CSS comment. The comment is still emitted (playground-friendly),
@@ -2662,6 +2999,18 @@ export class JekyllEngine {
       };
       results.push(cssResult);
       if (this.options.stdout) this.options.stdout(cssResult);
+      // FIX (sourcemap page): jekyll-sass-converter emits the .css.map as a
+      // page (SourceMapPage) alongside the stylesheet.
+      if (compiled.sourceMap && compiled.sourceMapPermalink) {
+        const mapResult = {
+          path: compiled.sourceMapPermalink.replace(/^\//, ''),
+          permalink: compiled.sourceMapPermalink,
+          data: {},
+          content: compiled.sourceMap,
+        };
+        results.push(mapResult);
+        if (this.options.stdout) this.options.stdout(mapResult);
+      }
     }
 
     // FIX (jekyll-feed generator): the real jekyll-feed plugin generates
@@ -2686,6 +3035,17 @@ export class JekyllEngine {
       const sitemapResult = await generateSitemap(this);
       results.push(sitemapResult);
       if (this.options.stdout) this.options.stdout(sitemapResult);
+      // FIX (robots.txt parity): jekyll-sitemap 1.4.0 also emits /robots.txt
+      // (the gem's lib/robots.txt through Liquid, layout nil) unless the site
+      // already has a page or static file at /robots.txt
+      // (jekyll-sitemap.rb #generate / #robots / #file_exists?).
+      const hasRobotsTxt = results.some((r) => r.permalink === '/robots.txt');
+      if (!hasRobotsTxt) {
+        this.options.logger('Generating robots.txt (jekyll-sitemap)...', 'info');
+        const robotsResult = await generateRobotsTxt(this);
+        results.push(robotsResult);
+        if (this.options.stdout) this.options.stdout(robotsResult);
+      }
     }
 
     await this._emit('post:build', results);

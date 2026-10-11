@@ -56,6 +56,34 @@ export const SITEMAP_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
 </urlset>
 `;
 
+// The real jekyll-sitemap v1.4.0 robots.txt source (lib/robots.txt), verbatim.
+export const ROBOTS_TEMPLATE = 'Sitemap: {{ "sitemap.xml" | absolute_url }}\n';
+
+/**
+ * Generate /robots.txt, mirroring jekyll-sitemap 1.4.0's generator
+ * (lib/jekyll/jekyll-sitemap.rb #generate / #robots): a PageWithoutAFile
+ * whose content is the gem's robots.txt rendered through Liquid with
+ * layout nil, emitted at /robots.txt. Callers must skip this when the
+ * site already has a page or static file with url "/robots.txt"
+ * (the gem's `file_exists?("robots.txt")` guard).
+ * @param {JekyllEngine} engine
+ * @returns {Promise<{path, permalink, data, content}>}
+ */
+export async function generateRobotsTxt(engine) {
+  const html = await engine.renderTemplate(ROBOTS_TEMPLATE, {
+    site: engine._buildSiteContext().site,
+    page: {},
+    jekyll: { version: '4.3.4' },
+  });
+
+  return {
+    path: 'robots.txt',
+    permalink: '/robots.txt',
+    data: {},
+    content: html,
+  };
+}
+
 /**
  * Sort comparator mirroring Jekyll's Document#<=> (document.rb): date
  * ascending, then relative-path tie-break. A doc with no resolvable date
@@ -80,19 +108,6 @@ const toTime = (v) => (v == null ? null : new Date(v).getTime());
 // Posts: _date is exactly front-matter `date:` || filename date (no
 // scan-time fallback is ever applied to posts) -- i.e. Jekyll's Document#date.
 const comparePosts = compareDocsByDateThenPath((p) => toTime(p._date));
-
-// Collection docs: mirror Document#date's front-matter -> filename fallback.
-// _date carries an extra `new Date()` scan-time fallback which must NOT
-// participate in ordering (real Jekyll falls back to site.time for ALL
-// undated docs, i.e. they compare equal and the path tie-break decides).
-function docFilenameDate(relPath) {
-  const base = (relPath || '').split('/').pop() || '';
-  const m = base.match(/^(\d{4})-(\d{1,2})-(\d{1,2})-/);
-  return m ? new Date(`${m[1]}-${m[2]}-${m[3]}`) : null;
-}
-const compareDocs = compareDocsByDateThenPath(
-  (d) => toTime(d.date ?? docFilenameDate(d._relPath || d.path))
-);
 
 // Real Jekyll: `site.pages.sort_by!(&:name)` (reader.rb #sort_files!) --
 // pages iterate sorted by basename, not full path.
@@ -143,7 +158,8 @@ export async function generateSitemap(engine) {
     }
     const cfg = collConfig[name];
     const collDocs = [...docs]
-      .sort(compareDocs)
+      // (no re-sort: engine._collections is already in sort_docs! order;
+      // re-sorting by date would destroy `sort_by:`/`order:` ordering)
       .map((d) => ({
         url: d._permalink || d.url,
         date: d._date || d.date,
@@ -152,8 +168,11 @@ export async function generateSitemap(engine) {
       }));
     collections.push({ docs: collDocs, output: cfg?.output === true });
   };
-  for (const name of Object.keys(collConfig)) pushCollection(name);
-  pushCollection('posts');
+  // FIX (SiteDrop parity): Liquid's site.collections is
+  // `@site.collections.values.sort_by(&:label)` (drops/site_drop.rb),
+  // NOT config order -- 'posts' sorts before 'tabs'.
+  for (const name of [...new Set([...Object.keys(collConfig), 'posts'])].sort())
+    pushCollection(name);
 
   // FIX (sitemap ordering parity): site.html_pages is the html-filtered page
   // list (the old code passed ALL pages, leaking e.g. /robots.txt into the

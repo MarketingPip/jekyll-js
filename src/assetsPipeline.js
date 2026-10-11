@@ -59,9 +59,72 @@ export function isSassAsset(path, content) {
  * Liquid-renders the stripped body before calling this; `content` here
  * should therefore already be Liquid-rendered. Partials pulled in via
  * @import are NOT Liquid-rendered -- same as real Jekyll.
- * @returns {{ css: string, permalink: string }}
+ *
+ * @param {string} env - Jekyll environment ('development' default). Real
+ *   Jekyll only writes sourcemaps when `sass.sourcemap` allows it for the
+ *   current env (jekyll-sass-converter passes sourceMap: :development by
+ *   default, i.e. maps only outside production).
+ * @returns {{ css: string, permalink: string, sourceMap: string|null,
+ *   sourceMapPermalink: string|null }} sourceMap is the processed
+ *   (relativized) .map JSON; null when sourcemaps are disabled.
  */
-export function compileSassAsset(path, content, vfs, config = {}, sass) {
+function posixRelative(fromFile, toFile) {
+  // Minimal posix relative(): from the css output file to the vfs source.
+  const fromParts = fromFile.split('/').slice(0, -1);
+  const toParts = toFile.split('/');
+  while (fromParts.length && toParts.length && fromParts[0] === toParts[0]) {
+    fromParts.shift();
+    toParts.shift();
+  }
+  return [...fromParts.map(() => '..'), ...toParts].join('/') || '.';
+}
+
+/**
+ * Rewrite dart-sass's sourceMap JSON the way jekyll-sass-converter does:
+ * sources are recorded relative from the emitted .css to the real source
+ * file (e.g. ../../_sass/minimal-mistakes/_copyright.scss), not vfs: URLs.
+ */
+function processSourceMap(rawMap, assetPath) {
+  const map = JSON.parse(rawMap);
+  // ORACLE-PROVEN (jekyll-sass-converter #process_source_map): sources are
+  // relativized from the SCSS *source* file's directory (dirname of the
+  // .scss page), and `file` is the emitted css basename.
+  const scssDir = assetPath.includes('/')
+    ? assetPath.slice(0, assetPath.lastIndexOf('/'))
+    : '';
+  map.file = assetPath.split('/').pop().replace(/\.(scss|sass)$/, '.css');
+  map.sources = (map.sources || []).map((s) => {
+    const m = String(s).match(/^vfs:\/\/(.+)$/);
+    if (!m) return s;
+    // relative from scssDir to the vfs path
+    const fromParts = scssDir ? scssDir.split('/') : [];
+    const toParts = m[1].replace(/^\//, '').split('/');
+    while (fromParts.length && toParts.length && fromParts[0] === toParts[0]) {
+      fromParts.shift();
+      toParts.shift();
+    }
+    return [...fromParts.map(() => '..'), ...toParts].join('/');
+  });
+  return JSON.stringify(map);
+}
+
+
+/**
+ * Should this compile emit a sourcemap? Mirrors jekyll-sass-converter:
+ * `sass.sourcemap: none` disables; `always` forces; otherwise (default
+ * `development`) maps are written only when NOT in production.
+ */
+function wantSourceMap(config, env = 'development') {
+  // Mirrors jekyll-sass-converter#sourcemap_required? exactly:
+  // default :always; :never disables; :development maps only in development.
+  const sm = config?.sass?.sourcemap;
+  if (sm === 'never' || sm === false) return false;
+  if (sm === 'always' || sm === true) return true;
+  if (sm === 'development') return env === 'development';
+  return true;
+}
+
+export function compileSassAsset(path, content, vfs, config = {}, sass, env = 'development') {
   if (!sass) {
     throw new Error(
       `Cannot compile ${path}: no Sass compiler provided. ` +
@@ -79,47 +142,77 @@ export function compileSassAsset(path, content, vfs, config = {}, sass) {
 
   // Build a map of all _sass/ partials for the custom importer
   const sassPartials = {};
+  // FIX (source maps): every lookup key also maps back to the REAL vfs path
+  // (with leading _ and extension), so load() can report the true file path
+  // in sourceMapUrl -- jekyll-sass-converter's map records
+  // ../../_sass/minimal-mistakes/_copyright.scss, not the normalized key.
+  const keyToVfsPath = {};
   for (const [vfsPath, vfsContent] of Object.entries(vfs)) {
     if (vfsPath.startsWith('_sass/')) {
       // Normalise the key to what Sass would request in an @import:
       // "_sass/minima/_base.scss" → both "minima/_base" and "minima/_base.scss"
       const rel = vfsPath.slice('_sass/'.length);
-      sassPartials[rel] = vfsContent;
-      sassPartials[rel.replace(/\.(scss|sass)$/, '')] = vfsContent;
-      // Also store with leading underscore stripped (Sass partial convention)
-      const noUnderscore = rel.replace(/\/_(?=[^/]+$)/, '/').replace(/^_/, '');
-      sassPartials[noUnderscore] = vfsContent;
-      sassPartials[noUnderscore.replace(/\.(scss|sass)$/, '')] = vfsContent;
+      const keys = [
+        rel,
+        rel.replace(/\.(scss|sass)$/, ''),
+        rel.replace(/\/_(?=[^/]+$)/, '/').replace(/^_/, ''),
+      ];
+      keys.push(keys[2].replace(/\.(scss|sass)$/, ''));
+      for (const k of keys) {
+        sassPartials[k] = vfsContent;
+        keyToVfsPath[k] = vfsPath;
+      }
     }
   }
 
   const importer = {
     canonicalize(url, context) {
+      // Single lookup helper: every key tried maps to its vfs: URL.
+      const tryKey = (k) => {
+        if (k != null && sassPartials[k] !== undefined) return new URL(`vfs:///${k}`);
+        return null;
+      };
       // When Sass resolves a nested @import from inside an already-loaded
-      // vfs: file, the `url` may be relative to the parent's canonical
-      // URL. Strip the vfs: scheme and parent directory if present.
+      // vfs: file, the `url` may be relative to the parent's canonical URL.
       let key = url;
       if (context?.containingUrl) {
         const containingPath = context.containingUrl.pathname.replace(/^\//, '');
         const containingDir = containingPath.includes('/')
           ? containingPath.slice(0, containingPath.lastIndexOf('/') + 1)
           : '';
-        const candidate = containingDir + url;
-        if (sassPartials[candidate] !== undefined) return new URL(`vfs:///${candidate}`);
-        if (sassPartials[candidate.replace(/\.scss$/, '')] !== undefined)
-          return new URL(`vfs:///${candidate.replace(/\.scss$/, '')}`);
+        // FIX (../ normalization): relative imports like
+        // `@use '../abstracts/mixins'` must resolve `..` segments in posix
+        // form before lookup.
+        const normalizePosix = (p) => {
+          const parts = [];
+          for (const seg of p.split('/')) {
+            if (seg === '..') parts.pop();
+            else if (seg !== '.' && seg !== '') parts.push(seg);
+          }
+          return parts.join('/');
+        };
+        const candidate = normalizePosix(containingDir + url);
+        const hit =
+          tryKey(candidate) ||
+          tryKey(candidate.replace(/\.(scss|sass)$/, '')) ||
+          tryKey(candidate.replace(/\/([^/]+)$/, '/_$1')) ||
+          tryKey(candidate.replace(/\/([^/]+)$/, '/_$1').replace(/\.(scss|sass)$/, ''));
+        if (hit) return hit;
       }
-      if (sassPartials[key] !== undefined) return new URL(`vfs:///${key}`);
-      // Try adding .scss extension
-      if (sassPartials[`${key}.scss`] !== undefined) return new URL(`vfs:///${key}.scss`);
-      // Also check without the leading _ (Sass convention)
-      const segments = key.split('/');
-      const last = segments[segments.length - 1];
-      const withUnderscore = [...segments.slice(0, -1), `_${last}`].join('/');
-      if (sassPartials[withUnderscore] !== undefined) return new URL(`vfs:///${withUnderscore}`);
-      if (sassPartials[`${withUnderscore}.scss`] !== undefined)
-        return new URL(`vfs:///${withUnderscore}.scss`);
-      return null;
+      // FIX (directory @forward/@use): dart-sass resolves a directory to
+      // its `_index.scss` / `_index.sass` (module system index files).
+      const dirIndex =
+        tryKey(`${key}/_index.scss`) || tryKey(`${key}/_index.sass`);
+      if (dirIndex) return dirIndex;
+      return (
+        tryKey(key) ||
+        tryKey(`${key}.scss`) ||
+        tryKey(`${key}.sass`) ||
+        tryKey(key.replace(/\/([^/]+)$/, '/_$1')) ||
+        tryKey(key.replace(/\/([^/]+)$/, '/_$1') + '.scss') ||
+        tryKey(key.replace(/\/([^/]+)$/, '/_$1') + '.sass') ||
+        null
+      );
     },
     load(canonicalUrl) {
       const key = canonicalUrl.pathname.replace(/^\//, ''); // strip leading /
@@ -127,16 +220,36 @@ export function compileSassAsset(path, content, vfs, config = {}, sass) {
         sassPartials[key] ||
         sassPartials[key.replace(/\.(scss|sass)$/, '')] ||
         '';
-      return { contents: source, syntax: key.endsWith('.sass') ? 'indented' : 'scss' };
+      // Report the REAL vfs path (with leading _ and extension) so the
+      // sourcemap's sources name the actual file, not the lookup key;
+      // processSourceMap() relativizes it the way the converter does.
+      const realVfsPath = keyToVfsPath[key] || key;
+      return {
+        contents: source,
+        syntax: key.endsWith('.sass') ? 'indented' : 'scss',
+        sourceMapUrl: new URL(`vfs:///${realVfsPath}`),
+      };
     },
   };
 
+  // FIX (sourcemap): jekyll-sass-converter requests a sourcemap
+  // (sourceMap: :development by default, :always, or :never via
+  // `sass.sourcemap`) and appends a sourceMappingURL comment to the CSS.
+  const doSourceMap = wantSourceMap(config, env);
   let result;
   try {
     result = sass.compileString(stripped, {
       syntax,
+      // Entry URL so the .map names the real scss file (not stdin).
+      url: new URL(`vfs:///${path}`),
       style: sassStyle === 'compressed' ? 'compressed' : 'expanded',
       importers: [importer],
+      sourceMap: doSourceMap,
+      sourceMapIncludeSources: doSourceMap,
+      // FIX (charset): jekyll-sass-converter passes `:charset => true`
+      // (scss.rb) -- with compressed output dart-sass emits a BOM for
+      // non-ASCII CSS instead of an @charset rule.
+      charset: true,
       // Silence deprecation warnings from real-world themes
       quietDeps: true,
       logger: sass.Logger.silent,
@@ -148,14 +261,33 @@ export function compileSassAsset(path, content, vfs, config = {}, sass) {
       css: `/* Sass compile error: ${err.message.replace(/\*\//g, '* /')} */`,
       permalink: sassToCssPermalink(path),
       error: err.message,
+      sourceMap: null,
+      sourceMapPermalink: null,
     };
   }
 
+  let css = result.css;
+  let sourceMap = null;
+  let sourceMapPermalink = null;
+  if (doSourceMap && result.sourceMap) {
+    const cssPermalink = sassToCssPermalink(path);
+    const mapName = cssPermalink.split('/').pop() + '.map';
+    sourceMapPermalink = cssPermalink + '.map';
+    // processSourceMap() relativizes vfs: URLs to ../../_sass/... form;
+    // the map file lands next to the css. Append the sourceMappingURL
+    // comment (no leading newlines when compressed, matching the gem).
+    sourceMap = processSourceMap(JSON.stringify(result.sourceMap), path);
+    css += `${sassStyle === 'compressed' ? '' : '\n\n'}/*# sourceMappingURL=${mapName} */`;
+  }
+
   return {
-    css: result.css,
+    css,
     permalink: sassToCssPermalink(path),
+    sourceMap,
+    sourceMapPermalink,
   };
 }
+
 
 function sassToCssPermalink(path) {
   return '/' + path.replace(/\.(scss|sass)$/, '.css');

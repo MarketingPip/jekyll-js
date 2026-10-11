@@ -68,6 +68,60 @@ function stripConditionParens(cond) {
 }
 
 /**
+ * P1 FIX (LiquidJS misparses `.[...]` dynamic lookup): Ruby Liquid allows
+ * `tabs.[tab_name]` (dot + bracket) as a dynamic property lookup, exactly
+ * equivalent to `tabs[tab_name]`. LiquidJS 10.x's readProperties() consumes
+ * the `.` then fails on `[` (not an identifier), silently dropping the
+ * lookup and returning the base object -- `{{ tabs.[k] | upcase }}` renders
+ * `[OBJECT OBJECT]`. Rewrite `. [` -> `[` inside {{ }}/{% %} tags
+ * (quote-aware; verbatim blocks untouched). Semantics-preserving in Ruby.
+ */
+
+/** {{ ... }} output span (non-greedy). */
+const OUTPUT_RE = /\{\{-?[\s\S]*?-?\}\}/g;
+
+/** Replace `.\s*[` with `[` outside quoted string literals. */
+function stripDotBracket(tag) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < tag.length; i++) {
+    const ch = tag[i];
+    if (quote) {
+      out += ch;
+      if (ch === quote && tag[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '.' && /^\s*\[/.test(tag.slice(i + 1))) {
+      // skip the dot and any whitespace; the '[' is copied next iteration
+      let j = i + 1;
+      while (j < tag.length && /\s/.test(tag[j])) j++;
+      i = j - 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+export function normalizeDotBracket(source) {
+  if (typeof source !== 'string' || !source.includes('.[')) return source;
+  const stash = [];
+  const stashed = source.replace(VERBATIM_RE, (m) => {
+    stash.push(m);
+    return `\u0000${stash.length - 1}\u0000`;
+  });
+  const processed = stashed
+    .replace(TAG_RE, stripDotBracket)
+    .replace(OUTPUT_RE, stripDotBracket);
+  return processed.replace(/\u0000(\d+)\u0000/g, (_, i) => stash[+i]);
+}
+
+/**
  * Rewrite parenthesized groups inside {% if %}/{% elsif %}/{% unless %}
  * conditions. All other template text is returned byte-identical.
  *
@@ -75,6 +129,9 @@ function stripConditionParens(cond) {
  * @returns {string} — source with grouping parens removed from conditions
  */
 export function preprocessConditionals(source) {
+  if (typeof source === 'string' && source.includes('.[')) {
+    source = normalizeDotBracket(source);
+  }
   if (typeof source !== 'string' || !source.includes('(')) return source;
 
   // Stash verbatim blocks so raw/comment/highlighted literal text is never touched.

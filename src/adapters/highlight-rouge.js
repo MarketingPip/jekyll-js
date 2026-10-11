@@ -10,6 +10,34 @@
 
 import { rougeHighlightInner } from '../../../kramdown-js/kramdown-rouge.js';
 
+// Language names with implemented Rouge 4.7.0 tokenizers in kramdown-rouge.js
+// (mirrors ROUGE_SUPPORTED_LANGS there; kept local to avoid touching that
+// file while another worker has it open).
+const ROUGE_LANGS = new Set([
+  'ruby', 'rb',
+  'html', 'htm', 'xhtml',
+  'liquid',
+  'js', 'javascript',
+  'css', 'scss', 'sass',
+  'yaml', 'yml',
+  'markdown', 'md',
+]);
+
+// Rouge's PlainText lexer aliases (tag 'plaintext', aliases 'text', 'plain').
+const PLAINTEXT_ALIASES = new Set(['plaintext', 'text', 'plain']);
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function normalizeLang(lang) {
+  return String(lang || 'plaintext').toLowerCase().split('?')[0];
+}
+
 /**
  * @type {Object} Highlighter adapter
  */
@@ -17,14 +45,17 @@ const rougeAdapter = {
   name: 'rouge-compat',
 
   highlight(code, lang) {
-    // rougeHighlightInner returns HTML with Rouge CSS classes
-    return rougeHighlightInner(code, lang || 'plaintext');
+    const l = normalizeLang(lang);
+    // Jekyll: Rouge::Lexer.find_fancy(@lang, code) || PlainText — unknown
+    // languages and plaintext fall back to escaped text (no spans).
+    if (PLAINTEXT_ALIASES.has(l)) return escapeHtml(code);
+    const html = rougeHighlightInner(code, l);
+    return html === null ? escapeHtml(code) : html;
   },
 
   supports(lang) {
-    // We support ruby and html (the two lexers implemented)
-    // Others fall back to plaintext
-    return ['ruby', 'html', 'plaintext', 'text'].includes(lang?.toLowerCase());
+    const l = normalizeLang(lang);
+    return PLAINTEXT_ALIASES.has(l) || ROUGE_LANGS.has(l);
   },
 };
 
