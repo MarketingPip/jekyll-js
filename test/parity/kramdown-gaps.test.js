@@ -92,7 +92,7 @@ describe('kramdown-js gaps round 3 (just-the-docs 100% parity, 2026-10-11)', () 
     expect(actual).toBe('<span class="ge">_or_</span>');
   });
 
-  test.failing('gap 9: markdown lexer list marker includes preceding newline', () => {
+  test('gap 9: markdown lexer list marker includes preceding newline [CLOSED 2026-10-11]', () => {
     // rouge: ^\s*[*+-] / ^\s*\d+\. — \s* consumes blank-line newlines
         const actual = formatRougeSpans(tokenizeMarkdown('{: .no_toc }\n\n1. TOC\n'));
     expect(actual).toBe('{: .no_toc }\n<span class="p">\n1.</span> TOC\n');
