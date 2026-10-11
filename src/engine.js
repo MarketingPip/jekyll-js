@@ -1135,6 +1135,19 @@ export class JekyllEngine {
   // Only filters LiquidJS genuinely lacks are registered below.
   _setupDefaultFilters() {
     const filters = {
+      // FIX (truncate Unicode parity): Ruby's String#length counts characters
+      // (code points), but JS string.length counts UTF-16 code units. An emoji
+      // like 🎨 (surrogate pair) counts as 1 in Ruby, 2 in JS, shifting the
+      // truncation point. Use code-point counting to match Ruby.
+      // (minimal-mistakes excerpts: oracle keeps '(' at pos 157, JS cut early)
+      truncate: (input, length = 50, truncateString = '...') => {
+        if (input == null) return '';
+        const str = String(input);
+        const ellipsis = String(truncateString);
+        const chars = [...str]; // code points, not UTF-16 units
+        if (chars.length <= length) return str;
+        return chars.slice(0, length - [...ellipsis].length).join('') + ellipsis;
+      },
       // FIX (#7 -- relative_url/absolute_url/strip_index missing or broken):
       relative_url: (input) => computeRelativeUrl(input, this._config),
       absolute_url: (input) => computeAbsoluteUrl(input, this._config),

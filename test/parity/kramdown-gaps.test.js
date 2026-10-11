@@ -47,7 +47,7 @@ describe('kramdown-js gaps (for coordinator)', () => {
     expect(actual).toBe(rubyExpected);
   });
 
-  test.failing('gap 4: GFM task lists (SHIMMED in adapter, native support needed)', () => {
+  test('gap 4: GFM task lists [CLOSED 2026-10-11] (SHIMMED in adapter, native support needed)', () => {
     // Ruby with input: GFM renders checkboxes
     const rubyExpected =
       '<ul class="task-list">\n' +
@@ -147,7 +147,7 @@ describe('kramdown-js gaps round 3 (just-the-docs 100% parity, 2026-10-11)', () 
     expect(actual).toContain('<p class="b c">P</p>');
   });
 
-  test.failing('gap 16: python lexer highlights code', () => {
+  test('gap 16: python lexer highlights code [CLOSED 2026-10-11]', () => {
     // just-the-docs index-test.md ```python fence; rougify highlights `def` as k.
         const actual = rougeHighlightInner('def dump_args(func):\n', 'python');
     expect(actual).toContain('<span class="k">def</span>');
