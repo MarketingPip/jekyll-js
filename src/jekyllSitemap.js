@@ -176,8 +176,13 @@ export async function generateSitemap(engine) {
 
   // FIX (sitemap ordering parity): site.html_pages is the html-filtered page
   // list (the old code passed ALL pages, leaking e.g. /robots.txt into the
-  // sitemap), sorted by basename like `site.pages.sort_by!(&:name)`.
-  const htmlPages = [...(siteCtx.html_pages || [])].sort(comparePagesByName);
+  // sitemap). _buildRootPagesSummary already orders it like Jekyll:
+  // regular pages sorted by basename (site.pages.sort_by!(&:name)), then
+  // generator pages (paginate page2..N, sitemap, etc.) appended in generator
+  // execution order (they're added after sort_files! runs). Do NOT re-sort
+  // here -- that would pull the appended pagination pages into basename
+  // order (oracle: page2..page14 come LAST).
+  const htmlPages = [...(siteCtx.html_pages || [])];
 
   const html = await engine.renderTemplate(
     // FIX (oracle-found): real jekyll-sitemap minifies the template with

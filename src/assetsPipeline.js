@@ -140,6 +140,77 @@ export function compileSassAsset(path, content, vfs, config = {}, sass, env = 'd
   const sassStyle = config?.sass?.style || 'expanded';
   const syntax = path.endsWith('.sass') ? 'indented' : 'scss';
 
+  const importer = buildVfsSassImporter(vfs, sass);
+
+  // FIX (sourcemap): jekyll-sass-converter requests a sourcemap
+  // (sourceMap: :development by default, :always, or :never via
+  // `sass.sourcemap`) and appends a sourceMappingURL comment to the CSS.
+  const doSourceMap = wantSourceMap(config, env);
+  let result;
+  try {
+    result = sass.compileString(stripped, {
+      syntax,
+      // Entry URL so the .map names the real scss file (not stdin).
+      url: new URL(`vfs:///${path}`),
+      style: sassStyle === 'compressed' ? 'compressed' : 'expanded',
+      importers: [importer],
+      sourceMap: doSourceMap,
+      sourceMapIncludeSources: doSourceMap,
+      // FIX (charset): jekyll-sass-converter passes `:charset => true`
+      // (scss.rb) -- with compressed output dart-sass emits a BOM for
+      // non-ASCII CSS instead of an @charset rule.
+      charset: true,
+      // Silence deprecation warnings from real-world themes
+      quietDeps: true,
+      logger: sass.Logger.silent,
+    });
+  } catch (err) {
+    // Return a CSS comment with the error rather than crashing the whole build.
+    // The `error` field lets callers (build()) also surface it via the logger.
+    return {
+      css: `/* Sass compile error: ${err.message.replace(/\*\//g, '* /')} */`,
+      permalink: sassToCssPermalink(path),
+      error: err.message,
+      sourceMap: null,
+      sourceMapPermalink: null,
+    };
+  }
+
+  let css = result.css;
+  let sourceMap = null;
+  let sourceMapPermalink = null;
+  if (doSourceMap && result.sourceMap) {
+    const cssPermalink = sassToCssPermalink(path);
+    const mapName = cssPermalink.split('/').pop() + '.map';
+    sourceMapPermalink = cssPermalink + '.map';
+    // processSourceMap() relativizes vfs: URLs to ../../_sass/... form;
+    // the map file lands next to the css. Append the sourceMappingURL
+    // comment (no leading newlines when compressed, matching the gem).
+    sourceMap = processSourceMap(JSON.stringify(result.sourceMap), path);
+    css += `${sassStyle === 'compressed' ? '' : '\n\n'}/*# sourceMappingURL=${mapName} */`;
+  }
+
+  return {
+    css,
+    permalink: sassToCssPermalink(path),
+    sourceMap,
+    sourceMapPermalink,
+  };
+}
+
+
+
+/**
+ * Build the dart-sass custom importer that resolves `@import`/`@use` from the
+ * VFS `_sass/` directory, exactly as jekyll-sass-converter passes the
+ * site's `_sass` dir as a load path. Shared by compileSassAsset() and the
+ * `scssify` Liquid filter (Jekyll::Filters#scssify → Scss#convert).
+ *
+ * @param {Object} vfs - virtual filesystem { path: content }
+ * @param {Object} sass - dart-sass implementation (only used for Logger types)
+ * @returns {Object} importer suitable for sass.compileString's `importers`
+ */
+export function buildVfsSassImporter(vfs, sass) {
   // Build a map of all _sass/ partials for the custom importer
   const sassPartials = {};
   // FIX (source maps): every lookup key also maps back to the REAL vfs path
@@ -232,62 +303,58 @@ export function compileSassAsset(path, content, vfs, config = {}, sass, env = 'd
     },
   };
 
-  // FIX (sourcemap): jekyll-sass-converter requests a sourcemap
-  // (sourceMap: :development by default, :always, or :never via
-  // `sass.sourcemap`) and appends a sourceMappingURL comment to the CSS.
-  const doSourceMap = wantSourceMap(config, env);
-  let result;
+  return importer;
+}
+
+/**
+ * Compile a raw SCSS string to CSS — the `scssify` Liquid filter.
+ * Mirrors Jekyll::Filters#scssify → Jekyll::Converters::Scss#convert as it
+ * behaves when invoked from a filter (jekyll-sass-converter 3.1.0,
+ * lib/jekyll/converters/scss.rb:49-53, 162-176):
+ *
+ * The :pages pre_render/post_render hooks only associate the shared Scss
+ * converter with .scss/.sass pages, so when scssify runs from inside a
+ * filter (e.g. a .css asset page) `associate_page_failed?` is true and
+ * `convert` compiles with `source_map: false` (no sourceMappingURL comment),
+ * `charset: false`, expanded style, and no entry URL.
+ *
+ * @param {string} input - raw SCSS source
+ * @param {Object} opts
+ * @param {Object} opts.vfs - virtual filesystem (for _sass/ @import lookups)
+ * @param {Object} [opts.config] - site config (sass.style honored)
+ * @param {Object} opts.sass - dart-sass implementation
+ * @param {string} [opts.virtualPath] - label used only for error messages
+ * @returns {string} compiled CSS
+ */
+export function compileSassString(input, { vfs, config = {}, sass, virtualPath = '<scssify>' } = {}) {
+  if (!sass) {
+    throw new Error(
+      `scssify: no Sass compiler provided. ` +
+        `Pass a compiler via the JekyllEngine \`sass\` option ` +
+        `(\`import * as sass from 'sass'\` in Node, or load dist/sass-plugin.js in the browser).`
+    );
+  }
+  const sassStyle = config?.sass?.style || 'expanded';
   try {
-    result = sass.compileString(stripped, {
-      syntax,
-      // Entry URL so the .map names the real scss file (not stdin).
-      url: new URL(`vfs:///${path}`),
+    const result = sass.compileString(String(input ?? ''), {
+      syntax: 'scss',
       style: sassStyle === 'compressed' ? 'compressed' : 'expanded',
-      importers: [importer],
-      sourceMap: doSourceMap,
-      sourceMapIncludeSources: doSourceMap,
-      // FIX (charset): jekyll-sass-converter passes `:charset => true`
-      // (scss.rb) -- with compressed output dart-sass emits a BOM for
-      // non-ASCII CSS instead of an @charset rule.
-      charset: true,
-      // Silence deprecation warnings from real-world themes
+      importers: [buildVfsSassImporter(vfs || {}, sass)],
+      // FIX (scssify parity): the shared Scss converter has no associated
+      // page when scssify runs from a filter, so jekyll-sass-converter
+      // compiles with source_map: false and charset: false.
+      sourceMap: false,
+      charset: false,
       quietDeps: true,
       logger: sass.Logger.silent,
     });
+    return result.css;
   } catch (err) {
-    // Return a CSS comment with the error rather than crashing the whole build.
-    // The `error` field lets callers (build()) also surface it via the logger.
-    return {
-      css: `/* Sass compile error: ${err.message.replace(/\*\//g, '* /')} */`,
-      permalink: sassToCssPermalink(path),
-      error: err.message,
-      sourceMap: null,
-      sourceMapPermalink: null,
-    };
+    // Jekyll parity: a Sass syntax error in scssify raises SyntaxError and
+    // fails the build (scss.rb:176-182). Surface it loudly, never silently.
+    throw new Error(`scssify: Sass compile error in ${virtualPath}: ${err.message}`);
   }
-
-  let css = result.css;
-  let sourceMap = null;
-  let sourceMapPermalink = null;
-  if (doSourceMap && result.sourceMap) {
-    const cssPermalink = sassToCssPermalink(path);
-    const mapName = cssPermalink.split('/').pop() + '.map';
-    sourceMapPermalink = cssPermalink + '.map';
-    // processSourceMap() relativizes vfs: URLs to ../../_sass/... form;
-    // the map file lands next to the css. Append the sourceMappingURL
-    // comment (no leading newlines when compressed, matching the gem).
-    sourceMap = processSourceMap(JSON.stringify(result.sourceMap), path);
-    css += `${sassStyle === 'compressed' ? '' : '\n\n'}/*# sourceMappingURL=${mapName} */`;
-  }
-
-  return {
-    css,
-    permalink: sassToCssPermalink(path),
-    sourceMap,
-    sourceMapPermalink,
-  };
 }
-
 
 function sassToCssPermalink(path) {
   return '/' + path.replace(/\.(scss|sass)$/, '.css');

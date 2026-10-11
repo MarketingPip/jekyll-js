@@ -290,3 +290,30 @@ describe('sort on hashes (Jekyll::Filters#sort parity)', () => {
     expect(out).toBe('1,2,3');
   });
 });
+
+describe('normalize_whitespace (Jekyll filters.rb)', () => {
+  // Ruby: input.to_s.gsub(%r!\s+!, " ").strip — Ruby \s is ASCII-only
+  // ([ \t\r\n\f\v]), unlike JS \s which also matches U+00A0 and other
+  // Unicode spaces. Verified: just-the-docs footnote backlinks keep
+  // their U+00A0 through normalize_whitespace in real Jekyll output.
+  test('collapses ASCII whitespace runs to one space', async () => {
+    const out = await renderFilter('{{ s | normalize_whitespace }}', {
+      s: 'a  b\tc\nd',
+    });
+    expect(out).toBe('a b c d');
+  });
+
+  test('does NOT collapse U+00A0 (Ruby \\s is ASCII-only)', async () => {
+    const out = await renderFilter('{{ s | normalize_whitespace }}', {
+      s: 'a b', // NBSP between a and b
+    });
+    expect(out).toBe('a b');
+  });
+
+  test('does NOT strip a leading/trailing U+00A0 (Ruby strip is ASCII-only)', async () => {
+    const out = await renderFilter('{{ s | normalize_whitespace }}', {
+      s: ' a ',
+    });
+    expect(out).toBe(' a');
+  });
+});

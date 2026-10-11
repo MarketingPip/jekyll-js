@@ -138,7 +138,11 @@ describe('FIX 5: missing link targets raise', () => {
       },
     });
     const res = await engine.build();
-    expect(res[0].content).toContain('/about.html');
+    // Build results follow site.pages order (reader.rb sort_files!:
+    // basename sort -> about.md renders before index.md), so locate the
+    // index page by path instead of assuming res[0].
+    const indexPage = res.find((r) => r.path === 'index.md');
+    expect(indexPage.content).toContain('/about.html');
   });
 });
 
@@ -222,6 +226,44 @@ describe('FIX 8: highlight linenos', () => {
     expect(res[0].content).toContain('<figure class="highlight">');
     expect(res[0].content).not.toContain('rouge-table');
   });
+
+  test('{% highlight %} renders its body through Liquid (Jekyll::Tags::Highlight#render calls super)', async () => {
+    // Real Jekyll renders the block body first: {% raw %} is consumed (so
+    // inner {% highlight %} tags survive as literal text) and {{ }} resolves.
+    // just-the-docs line-numbers.md depends on this.
+    const engine = new JekyllEngine({
+      vfs: {
+        'index.md':
+          '---\ntitle: H\n---\n{% highlight yaml %}\n{% raw %}{% highlight some_language %}\nSome code\n{% endhighlight %}{% endraw %}\n{% endhighlight %}',
+      },
+      highlighter: hljs,
+    });
+    const res = await engine.build();
+    const html = res[0].content;
+    expect(html).not.toContain('{% raw %}');
+    expect(html).not.toContain('{% endraw %}');
+    // the inner highlight tags survive as literal (highlighted yaml) text
+    expect(html.replace(/<[^>]+>/g, '')).toContain('{% highlight some_language %}');
+  });
+
+  test('{% highlight %} with a nested same-name block nests correctly', async () => {
+    const engine = new JekyllEngine({
+      vfs: {
+        'index.md':
+          '---\ntitle: H\n---\n{% highlight text %}a\n{% highlight text %}b\n{% endhighlight %}c\n{% endhighlight %}',
+      },
+      highlighter: hljs,
+    });
+    const res = await engine.build();
+    // Ruby Liquid parses the inner {% highlight %} as a nested block: it
+    // renders to a figure, then the OUTER highlight (lang=text, i.e. Rouge
+    // plaintext) escapes that HTML like any other code text. So the inner
+    // tags never leak as literals, and the nested figure appears escaped.
+    const html = res[0].content;
+    expect(html).not.toContain('{% endhighlight %}');
+    expect(html).toContain('&lt;figure class=&quot;highlight&quot;&gt;');
+    expect(html.match(/<figure class="highlight">/g).length).toBe(1);
+  });
 });
 
 describe('highlight is an optional plugin', () => {
@@ -232,6 +274,24 @@ describe('highlight is an optional plugin', () => {
       },
     });
     await expect(engine.build()).rejects.toThrow(/no syntax highlighter was provided/);
+  });
+
+  test('raw highlight.js is called with the v11 (code, {language}) convention', async () => {
+    // The engine documents `import hljs from 'highlight.js'` (raw) as the
+    // highlighter. hljs v11's highlight(code, options) treats a STRING
+    // second arg as the deprecated v10 (lang, code) signature, so the tag
+    // must pass { language } explicitly — otherwise nothing highlights.
+    const engine = new JekyllEngine({
+      vfs: {
+        'index.md': '---\ntitle: H\n---\n{% highlight yaml %}\nkey: value\n{% endhighlight %}',
+      },
+      highlighter: hljs,
+    });
+    const res = await engine.build();
+    const html = res[0].content;
+    expect(html).toContain('key');
+    // hljs actually highlighted (not escaped-plaintext fallback)
+    expect(html).toMatch(/<span class="hljs-[a-z]+">/);
   });
 
   test('sites without {% highlight %} build fine with no highlighter', async () => {
@@ -290,5 +350,25 @@ describe('FIX 9: scss entry points outside assets/', () => {
     });
     const res = await engine.build();
     expect(res.some((r) => r.path === 'index.md')).toBe(true);
+  });
+});
+
+describe('FIX: highlight plaintext fallback escaping (Rouge parity)', () => {
+  test('{% highlight %} with unknown language escapes &<> but not " (Rouge::Formatters::HTML)', async () => {
+    // Jekyll::Tags::Highlight#render_rouge falls back to Rouge::Lexers::PlainText
+    // for unknown languages; Rouge::Formatters::HTML escapes only &<>.
+    // Ground truth: rougify on `<pre class="x">&` with PlainText ->
+    // `&lt;pre class="x"&gt;&amp;` (quotes NOT escaped).
+    const engine = new JekyllEngine({
+      vfs: {
+        'index.md':
+          '---\ntitle: H\n---\n{% highlight some_language %}\n<pre class="x">&\n{% endhighlight %}',
+      },
+      highlighter: hljs,
+    });
+    const res = await engine.build();
+    const html = res[0].content;
+    expect(html).toContain('&lt;pre class="x"&gt;&amp;');
+    expect(html).not.toContain('&quot;');
   });
 });

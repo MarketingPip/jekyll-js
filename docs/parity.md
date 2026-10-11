@@ -71,9 +71,60 @@ all oracle-verified against Jekyll 4.3.4).
 2. **Sass source maps**: Real Jekyll emits `/*# sourceMappingURL=... */`;
    we don't generate source maps yet.
 3. **Collection `sort_by` / `order` metadata** — not implemented.
-4. **Excerpt edge cases** (empty `excerpt_separator`, link-ref appending).
+4. **kramdown-js gaps** (documented in `test/parity/kramdown-gaps.test.js`,
+   shimmed in `src/adapters/markdown-kramdown.js` where feasible):
+   - Source-entity passthrough: Ruby preserves `&name;` verbatim;
+     kramdown-js decodes (text) or escapes (block HTML). The adapter
+     restores block-HTML entities via `fixBlockHtmlEntities()`.
+   - Block separation: Ruby emits `\n\n` only for blank lines in src;
+     kramdown-js always emits `\n\n` between blocks.
+   - GFM task lists: shimmed via `fixTaskLists()` (byte-identical output).
+   - Footnote/table HTML indent: Ruby indents nested elements;
+     kramdown-js uses flat indent (affects feed.xml, TOC posts).
+   - Rouge lexer: JS `nf` vs `nx` token classification; Wolfram lexer
+     missing (in kramdown-js, not jekyll-js).
 5. **BigDecimal precision**: WASM oracle uses float-backed shim; native
    oracle is authoritative for numeric edge cases.
+
+### Fixed in round 3 (2026-10-11, just-the-docs 53/62, up from 50/62)
+
+- `scssify` Liquid filter (jekyll-sass-converter shared Scss converter:
+  no sourceMappingURL, `charset: false`, expanded style).
+- sitemap.xml: `/404` entry (real `Page#html?` predicate via
+  `output_ext`, not URL suffix) + page order (DFS subdirs-first, stable
+  basename sort per `reader.rb`/`sort_files!`).
+- `normalize_whitespace`: ASCII-only `\s` (Ruby semantics; preserves NBSP).
+- `{% highlight %}` renders body through Liquid (Ruby `Highlight#render`
+  calls `super`); raw highlight.js called with v11 `(code, {language})`.
+- `{% highlight %}` plaintext fallback escapes `&<>` only (Rouge HTML
+  formatter parity; `"` stays literal).
+- `site.github.*` (jekyll-github-metadata offline subset: `repository_url`,
+  `repository_nwo`, `owner_*`, gated on `plugins:`).
+
+### Open kramdown-js gaps (just-the-docs round 3; TDD tests + patches reported, not applied)
+
+- Markdown lexer: blockquote whole-line `gt`; `_em_` → `ge`; list-marker
+  `^\s*` (newline in `p` span); fence `p`/`nl` classes + sublexer delegation.
+- Smart quotes: quote after whitespace → OPEN (SQ_RULES 6/10 anchoring).
+- GFM task lists (Jekyll defaults `input: GFM`).
+- `{::options}` block extension breaks following reference definitions.
+- `{:toc}` inside `<details markdown="block">` dropped.
+- Block IAL applied twice after `<figure>` HTML block.
+- Python lexer missing.
+- Harness: `{% highlight %}` needs the Rouge adapter (not raw hljs) for
+  byte-parity; hljs span classes differ from Rouge.
+
+### Fixed in round 3 (2026-10-11, minimal-mistakes 186/213)
+
+- Trailing/leading blank-line parity (Ruby `:blank` elements).
+- Excerpt link-reference definitions (Jekyll `excerpt.rb`).
+- `{:toc}` auto-TOC generation (incl. `toc_levels: 1..6` string parsing).
+- HTML comment blank lines.
+- Sitemap.xml pagination page ordering (append, don't re-sort).
+- `site.categories`/`site.tags` key insertion order (oldest-first).
+- `url_encode` filter (Ruby `URI.encode_www_form_component` semantics:
+  `'`→`%27`, space→`+`, etc.).
+- GFM task lists (adapter shim, byte-identical).
 
 ## Intentional deviations
 

@@ -21,6 +21,7 @@
 import { TokenKind, Context } from 'liquidjs';
 import { patchBlankBlockSkipping } from './liquidBlankBlocks.js';
 import { SEO_TAG_TEMPLATE } from './seoTagTemplate.js';
+import { compileSassString } from './assetsPipeline.js';
 
 // ─── Ruby Liquid string-indexing parity ─────────────────────────────────────
 // Ruby Liquid (variable_lookup.rb): a String does not respond to `key?` or
@@ -64,27 +65,59 @@ function registerHighlightTag(engine, highlighter) {
       this.linenos = args.includes('linenos');
       this.tokens = [];
       let closed = false;
+      // FIX (nested-block parity): Ruby Liquid's BlockBody#parse parses
+      // nested blocks of the SAME name recursively, and Raw/Comment blocks
+      // opaquely (their inner tags are raw text, never parsed). Mirror
+      // that so `{% raw %}{% highlight x %}...{% endhighlight %}{% endraw %}`
+      // inside a highlight body doesn't terminate the outer block early
+      // (just-the-docs line-numbers.md) and nested {% highlight %} nests.
+      let depth = 1;
+      const shiftOpaque = (endName) => {
+        while (remainTokens.length) {
+          const t = remainTokens.shift();
+          this.tokens.push(t);
+          if (t.kind === TokenKind.Tag && t.name === endName) return;
+        }
+      };
       while (remainTokens.length) {
         const token = remainTokens.shift();
         // FIX (minification fragility): the old check used
         // token.constructor.name === 'TagToken', which breaks under
         // minified LiquidJS builds (the browser path this engine
         // documents). TokenKind.Tag is minification-safe.
-        if (token.kind === TokenKind.Tag && token.name === 'endhighlight') {
-          closed = true;
-          break;
+        if (token.kind === TokenKind.Tag) {
+          if (token.name === 'highlight') depth++;
+          else if (token.name === 'endhighlight') {
+            depth--;
+            if (depth === 0) {
+              closed = true;
+              break;
+            }
+          } else if (token.name === 'raw') {
+            this.tokens.push(token);
+            shiftOpaque('endraw');
+            continue;
+          } else if (token.name === 'comment') {
+            this.tokens.push(token);
+            shiftOpaque('endcomment');
+            continue;
+          }
         }
         this.tokens.push(token);
       }
       if (!closed) throw new Error('{% highlight %} tag not closed with {% endhighlight %}');
     },
     async render(ctx) {
-      // Render any Liquid inside the block first (unusual but valid)
-      const rawCode = this.tokens
+      // FIX (Highlight#render parity): Jekyll::Tags::Highlight#render calls
+      // `super` — the block body is rendered through Liquid FIRST (so
+      // {% raw %} is consumed and {{ variables }} resolve), and only the
+      // rendered text is syntax-highlighted.
+      const rawBody = this.tokens
         .map((t) => (typeof t.getText === 'function' ? t.getText() : t.value ?? ''))
         .join('');
+      const renderedBody = await this.liquid.parseAndRender(rawBody, ctx.getAll());
       // Jekyll::Tags::Highlight#render: strips ALL leading/trailing \r and \n.
-      const code = rawCode.replace(/^[\r\n]+/, '').replace(/[\r\n]+$/, '');
+      const code = renderedBody.replace(/^[\r\n]+/, '').replace(/[\r\n]+$/, '');
 
       if (!highlighter || typeof highlighter.highlight !== 'function') {
         throw new Error(
@@ -98,15 +131,39 @@ function registerHighlightTag(engine, highlighter) {
         // Rouge-compat adapter: highlight(code, lang) returns inner HTML;
         // supports(lang) gates the language. (Jekyll 4.3.4 highlight.rb
         // render_rouge: Lexer.find_fancy(@lang, code) || PlainText.)
-        const supported = typeof highlighter.supports === 'function'
-          ? highlighter.supports(this.lang)
-          : true;
-        if (supported) {
-          highlighted = await highlighter.highlight(code, this.lang);
+        //
+        // FIX (raw-hljs call convention): the engine documents raw
+        // highlight.js (`import hljs from 'highlight.js'`) as the
+        // highlighter, but hljs v11's highlight(code, options) reads a
+        // STRING second arg as the deprecated v10 (lang, code) signature —
+        // so highlight(code, lang) highlights nothing (and warns). Detect
+        // raw hljs by its getLanguage() (adapters don't have it) and call
+        // highlight(code, { language }) instead.
+        const isRawHljs =
+          typeof highlighter.getLanguage === 'function' &&
+          typeof highlighter.supports !== 'function';
+        let supported;
+        let hljsLang = null;
+        if (typeof highlighter.supports === 'function') {
+          supported = highlighter.supports(this.lang);
+        } else if (isRawHljs) {
+          hljsLang = highlighter.getLanguage(this.lang)
+            ? this.lang
+            : highlighter.getLanguage(this.lang.toLowerCase())
+              ? this.lang.toLowerCase()
+              : null;
+          supported = hljsLang !== null;
+        } else {
+          supported = true;
         }
-        if (highlighted == null) highlighted = escapeHtml(code);
+        if (supported) {
+          highlighted = isRawHljs
+            ? highlighter.highlight(code, { language: hljsLang }).value
+            : await highlighter.highlight(code, this.lang);
+        }
+        if (highlighted == null) highlighted = escapeRougeText(code);
       } catch (err) {
-        highlighted = escapeHtml(code);
+        highlighted = escapeRougeText(code);
       }
       // Jekyll::Tags::Highlight#add_code_tag: "#{code.chomp}" — one trailing
       // line break removed from the FINAL output. For non-linenos that's the
@@ -655,7 +712,15 @@ function registerFilterFixes(engine, opts = {}) {
 
   engine.registerFilter('normalize_whitespace', (input) => {
     if (input == null) return '';
-    return String(input).replace(/\s+/g, ' ').trim();
+    // FIX (Ruby \s parity): Jekyll's normalize_whitespace is
+    // `input.to_s.gsub(%r!\s+!, " ").strip` (filters.rb) and Ruby's \s is
+    // ASCII-only ([ \t\r\n\f\v]) — unlike JS \s, it does NOT match U+00A0
+    // or other Unicode spaces, and Ruby's strip only trims ASCII
+    // whitespace (+ \0). Verified: just-the-docs footnote backlinks keep
+    // their U+00A0 through this filter in real Jekyll output.
+    return String(input)
+      .replace(/[ \t\r\n\f\v]+/g, ' ')
+      .replace(/^[ \t\r\n\f\v\0]+|[ \t\r\n\f\v\0]+$/g, '');
   });
 
   // FIX: Ruby's grouping_filters.rb stringifies group keys:
@@ -809,6 +874,20 @@ function registerFilterFixes(engine, opts = {}) {
       Date.prototype.toJSON = origToJSON;
     }
   });
+
+  // FIX (scssify): Jekyll::Filters#scssify (jekyll 4.3.4, filters.rb:49-53)
+  // compiles an SCSS string via the site's shared Scss converter. LiquidJS
+  // has no such filter. compileSassString() mirrors Scss#convert exactly as
+  // it behaves from a filter: no associated page → source_map: false,
+  // charset: false, expanded style, VFS _sass/ import resolution.
+  // (jekyll-sass-converter 3.1.0, lib/jekyll/converters/scss.rb:162-176)
+  engine.registerFilter('scssify', function (input) {
+    return compileSassString(input, {
+      vfs: typeof opts.getVfsTemplates === 'function' ? opts.getVfsTemplates() : {},
+      config: typeof opts.getConfig === 'function' ? opts.getConfig() : {},
+      sass: opts.sass,
+    });
+  });
 }
 
 // ─── filter-fix helpers ─────────────────────────────────────────────────────
@@ -842,6 +921,13 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// Rouge::Formatters::HTML escapes only &<> (rouge 4.7.0, formatters/html.rb).
+// Used for the {% highlight %} plaintext fallback (unknown language ->
+// Rouge::Lexers::PlainText), where escaping " would diverge from the oracle.
+function escapeRougeText(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 export function registerJekyllExtensions(liquidEngine, opts = {}) {

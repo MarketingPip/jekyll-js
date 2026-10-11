@@ -20,6 +20,7 @@ import { preprocessConditionals } from './liquidPreprocess.js';
 import { isSassAsset, compileSassAsset, wantSourceMap } from './assetsPipeline.js';
 import { isFeedEnabled, generateFeeds } from './jekyllFeed.js';
 import { isSitemapEnabled, generateSitemap, generateRobotsTxt } from './jekyllSitemap.js';
+import { isGithubMetadataEnabled, buildGithubNamespace } from './jekyllGithubMetadata.js';
 import { redirectFromPlugin } from './jekyllRedirectFrom.js';
 
 // Check if jekyll-redirect-from is enabled via plugins config
@@ -280,6 +281,62 @@ function substitutePagePermalinkPlaceholders(permalink, vfsPath) {
     .replace(/:path/g, dir)
     .replace(/:basename/g, basename)
     .replace(/:output_ext/g, outputExt);
+}
+
+// FIX (page read order parity): Jekyll's reader.rb#read_directories reads
+// depth-first with subdirectories BEFORE the files of each directory
+// (retrieve_dirs runs before retrieve_pages), then sort_files! runs
+// `site.pages.sort_by!(&:name)` — a basename sort, stable for ties
+// (verified against CRuby: ties keep DFS read order). Reconstruct that
+// order from the flat VFS ingestion order (which mirrors readdir order
+// within each directory, the same order Ruby's Dir.entries sees).
+function sortPagesJekyllReadOrder(pages) {
+  const nodes = new Map(); // dir -> { subdirs: [child dirs, first-seen], pages: [...] }
+  const nodeFor = (dir) => {
+    let n = nodes.get(dir);
+    if (!n) {
+      n = { subdirs: [], pages: [] };
+      nodes.set(dir, n);
+    }
+    return n;
+  };
+  nodeFor('');
+  for (const p of pages) {
+    const path = p.path || '';
+    const slash = path.lastIndexOf('/');
+    const dir = slash === -1 ? '' : path.slice(0, slash);
+    // Register the ancestor chain so each dir lists its subdirs first-seen.
+    const parts = dir === '' ? [] : dir.split('/');
+    let cur = '';
+    for (const part of parts) {
+      const child = cur === '' ? part : `${cur}/${part}`;
+      if (!nodes.has(child)) {
+        nodes.set(child, { subdirs: [], pages: [] });
+        nodeFor(cur).subdirs.push(child);
+      }
+      cur = child;
+    }
+    nodeFor(dir).pages.push(p);
+  }
+  const out = [];
+  const visit = (dir) => {
+    const n = nodes.get(dir);
+    for (const sub of n.subdirs) visit(sub); // retrieve_dirs first
+    for (const p of n.pages) out.push(p); // then retrieve_pages
+  };
+  visit('');
+  // sort_files!: site.pages.sort_by!(&:name) — stable for ties.
+  const basename = (p) => {
+    const s = p.path || '';
+    const i = s.lastIndexOf('/');
+    return i === -1 ? s : s.slice(i + 1);
+  };
+  out.sort((a, b) => {
+    const x = basename(a);
+    const y = basename(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+  return out;
 }
 
 // High fidelity browser-native Markdown Parser using "marked"
@@ -761,7 +818,24 @@ function extractExcerpt(content, separator) {
   if (!separator) return content;
   const idx = content.indexOf(separator);
   if (idx === -1) return content;
-  return content.slice(0, idx);
+  const head = content.slice(0, idx);
+  const tail = content.slice(idx + separator.length);
+  if (tail === '') return head;
+  // FIX (excerpt link reference definitions): Jekyll's Excerpt#extract_excerpt
+  // (jekyll 4.3.4, lib/jekyll/excerpt.rb) appends markdown link reference
+  // definitions found in the tail when the head references them, so the
+  // excerpt renders standalone. MKDWN_LINK_REF_REGEX =
+  // %r!^ {0,3}(?:(\[[^\]]+\])(:.+))$! -- this also catches footnote
+  // definitions ([^1]: ...), which is why a [^1] ref in an excerpt resolves
+  // to "1" after markdownify+strip_html instead of rendering raw.
+  // (excerpt.rb's sanctify_liquid_tags for cut-off Liquid blocks is not
+  // ported yet -- no theme fixture exercises it; tracked separately.)
+  const definitions = [];
+  for (const m of tail.matchAll(/^ {0,3}(\[[^\]]+\])(:.+)$/gm)) {
+    if (head.includes(m[1])) definitions.push(m[1] + m[2]);
+  }
+  if (definitions.length === 0) return head;
+  return head + '\n\n' + definitions.join('\n');
 }
 
 // FIX (pagination was entirely unimplemented): mirrors the classic
@@ -940,6 +1014,11 @@ export class JekyllEngine {
       // jsonify needs site.timezone for Ruby Time#to_json format. Config
       // loads after constructor, so pass a getter, not the value.
       getTimezone: () => this._config?.timezone,
+      // scssify filter (Jekyll::Filters#scssify) needs the Sass compiler
+      // plus lazy VFS/config access (useVFS runs after this registration).
+      sass: options.sass,
+      getVfsTemplates: () => this.vfsTemplates,
+      getConfig: () => this._config,
       getInclude: (filename) => {
         const cleanFile = this._resolveVfsPath(`_includes/${filename}`);
         // Also try without _includes/ prefix
@@ -1060,6 +1139,16 @@ export class JekyllEngine {
       relative_url: (input) => computeRelativeUrl(input, this._config),
       absolute_url: (input) => computeAbsoluteUrl(input, this._config),
       strip_index: (input) => stripIndex(input),
+      // FIX (url_encode parity): Ruby's URI.encode_www_form_component encodes
+      // '()!~ as %27/%28/%29/%21/%7E and space as +, while JS
+      // encodeURIComponent leaves '()!~ unencoded and uses %20 for space.
+      // (jekyll/welcome-to-jekyll, edge-case-very-long-title share URLs)
+      url_encode: (input) =>
+        encodeURIComponent(String(input ?? ''))
+          .replace(/%20/g, '+')
+          .replace(/[!'()~]/g, (ch) =>
+            '%' + ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')
+          ),
       // FIX (#6 -- no inline `markdownify` filter existed, only the
       // page-level .md -> HTML conversion step):
       markdownify: (input) => this._renderMarkdown(input),
@@ -1876,6 +1965,12 @@ export class JekyllEngine {
     // traversed when they survived the filter).
     this._readIncludedExcludes(vfs);
 
+    // FIX (page order parity -- reader.rb sort_files!): Jekyll reads pages
+    // depth-first (subdirectories before sibling files) then stable-sorts
+    // site.pages by basename. Apply once ingestion is complete so every
+    // consumer (site.pages, site.html_pages, sitemap) sees Jekyll's order.
+    this._rootPages = sortPagesJekyllReadOrder(this._rootPages);
+
     // FIX (same-date ordering): Ruby's Document#<=> tie-breaks by path
     // when dates are equal. Without this, same-date posts order randomly.
     if (this._collections.posts) {
@@ -2506,6 +2601,22 @@ export class JekyllEngine {
     };
   }
 
+  /**
+   * jekyll-github-metadata parity (offline subset): the gem's
+   * SiteGitHubMunger sets site.github to the metadata drop merged over
+   * any user `github:` config hash (site_github_munger.rb:38-47). Returns
+   * `{ github: {...} }` or `{}` when the plugin is off / nothing derives.
+   */
+  _siteGithub() {
+    if (!isGithubMetadataEnabled(this._config)) return {};
+    const derived = buildGithubNamespace(this._config);
+    const user = this._config?.github;
+    const userHash =
+      user && typeof user === 'object' && !Array.isArray(user) ? user : {};
+    if (!derived && Object.keys(userHash).length === 0) return {};
+    return { github: { ...derived, ...userHash } };
+  }
+
   _buildSiteContext(currentPost = null) {
     // FIX (custom front-matter fields were silently dropped from
     // site.posts): the original hardcoded a narrow whitelist (title,
@@ -2521,19 +2632,25 @@ export class JekyllEngine {
     const tagsMap = {};
     const categoriesMap = {};
 
-    posts.forEach((post) => {
+    // FIX (site.categories/site.tags key order): Jekyll's Site#post_attr_hash
+    // iterates `posts.docs` (collection order: date-ASCENDING, oldest first)
+    // when building the hash, so category/tag keys are in oldest-first
+    // insertion order. _collections.posts is descending (for site.posts),
+    // so iterate reversed here. (The per-key post arrays stay newest-first,
+    // matching Jekyll's `posts.sort!.reverse!`.)
+    [...posts].reverse().forEach((post) => {
       if (post.tags) {
         const list = Array.isArray(post.tags) ? post.tags : [post.tags];
         list.forEach((tag) => {
           tagsMap[tag] ||= [];
-          tagsMap[tag].push(post);
+          tagsMap[tag].unshift(post);
         });
       }
       if (post.categories) {
         const list = Array.isArray(post.categories) ? post.categories : [post.categories];
         list.forEach((cat) => {
           categoriesMap[cat] ||= [];
-          categoriesMap[cat].push(post);
+          categoriesMap[cat].unshift(post);
         });
       }
     });
@@ -2568,10 +2685,28 @@ export class JekyllEngine {
     const pages = this._buildRootPagesSummary();
     // FIX (site.html_pages was entirely unimplemented): mirrors real
     // Jekyll's SiteDrop#html_pages predicate exactly (`page.html? ||
-    // page.url.end_with?("/")`) -- adapted since this engine has no
-    // separate "output extension" concept: a page counts as HTML if its
-    // resolved url ends with ".html" or with "/".
-    const htmlPages = pages.filter((p) => p.url.endsWith('.html') || p.url.endsWith('/'));
+    // page.url.end_with?("/")`, drops/site_drop.rb:31-35) where Page#html?
+    // is `HTML_EXTENSIONS.include?(output_ext)` (page.rb:169-171) and
+    // output_ext is `permalink_ext || converter_output_ext`
+    // (renderer.rb:45-47, 237-247): an explicit non-"/" permalink's own
+    // extension wins (index.md + `permalink: /data.json` -> .json, NOT
+    // html), otherwise the converter's extension (.md/.markdown -> .html).
+    // Hence 404.html + `permalink: /404` is html (permalink has no
+    // extension -> converter .html) while /data.json is not.
+    const HTML_OUTPUT_EXTS = new Set(['.html', '.xhtml', '.htm']);
+    const outputExtOf = (p) => {
+      const perm = p.permalink;
+      if (typeof perm === 'string' && !perm.endsWith('/')) {
+        const pm = perm.match(/(\.[^/.]+)$/);
+        if (pm) return pm[1].toLowerCase();
+      }
+      const m = (p.path || '').match(/\.[^/.]+$/);
+      const ext = (m ? m[0] : '.html').toLowerCase();
+      return ext === '.md' || ext === '.markdown' ? '.html' : ext;
+    };
+    const htmlPages = pages.filter(
+      (p) => HTML_OUTPUT_EXTS.has(outputExtOf(p)) || (p.url || '').endsWith('/')
+    );
 
     // FIX (site.collections was entirely unimplemented): real Jekyll's
     // SiteDrop#collections returns collections sorted by label (drops/
@@ -2596,6 +2731,10 @@ export class JekyllEngine {
     return {
       site: {
         ...this._config,
+        // FIX (jekyll-github-metadata): the gem's SiteGitHubMunger populates
+        // site.github (offline-derivable fields from `repository:` here);
+        // a user `github:` config hash merges over the derived fields.
+        ...this._siteGithub(),
         // FIX (site.time): Jekyll sets site.time to the build time, once.
         // Config `time:` overrides (for reproducible builds).
         // Uses this._siteTime (set once in useVFS) for singularity.

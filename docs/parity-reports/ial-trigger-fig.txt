@@ -1,0 +1,9 @@
+<figure class="highlight"><pre><code class="language-markdown" data-lang="markdown"><span class="hljs-code">```mermaid
+graph TD;
+    accTitle: the diamond pattern
+    accDescr: a graph with four nodes: A points to B and C, while B and C both point to D
+    A--&gt;B;
+    A--&gt;C;
+    B--&gt;D;
+    C--&gt;D;
+```</span></code></pre></figure>
