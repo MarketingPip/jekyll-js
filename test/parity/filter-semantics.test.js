@@ -124,6 +124,23 @@ describe('split (Ruby String#split)', () => {
     const out = await renderFilter('{{ s | split: "," | join: ";" }}', { s: 'a,b,' });
     expect(out).toBe('a;b');
   });
+
+  test('split: " " does NOT split on U+00A0 nbsp (Ruby parity)', async () => {
+    // Oracle (ruby -e): "a b".split(" ") -> ["a b"]  (nbsp is not ASCII whitespace to Ruby)
+    // Regression: the old /\s+/ split broke just-the-docs footnote backlinks
+    // (kramdown emits U+00A0 before the backlink; the compress layout's
+    // `split: " " | join: " "` turned it into a regular space).
+    const out = await renderFilter('{{ s | split: " " | join: "," }}', { s: 'a b' });
+    expect(out).toBe('a b');
+  });
+
+  test('split: " " does NOT strip leading/trailing nbsp (Ruby parity)', async () => {
+    // Oracle: " leading".split(" ") -> [" leading"]; "trailing ".split(" ") -> ["trailing "]
+    const out = await renderFilter('{{ s | split: " " | join: "," }}', { s: ' leading' });
+    expect(out).toBe(' leading');
+    const out2 = await renderFilter('{{ s | split: " " | join: "," }}', { s: 'trailing ' });
+    expect(out2).toBe('trailing ');
+  });
 });
 
 describe('escape (Ruby: nil in -> nil out)', () => {
@@ -247,5 +264,29 @@ describe('where (Jekyll compare_property_vs_target)', () => {
     // 2-arg-nil forms share one mental model ("omitted value = nil").
     const out = await renderFilter('{{ w | where: "val" | map: "title" | join: "," }}', { w });
     expect(out).toBe('nil');
+  });
+});
+
+describe('sort on hashes (Jekyll::Filters#sort parity)', () => {
+  // Grounding: Jekyll 4.3.4 overrides Liquid's sort (lib/jekyll/filters.rb):
+  //   def sort(input, property = nil, nils = "first")
+  //     raise ArgumentError, "Cannot sort a null object." if input.nil?
+  //     if property.nil?
+  //       input.sort   # <-- Ruby Hash#sort -> [[key, value], ...] by key
+  // Ruby Liquid's own sort would wrap the hash as [hash] (InputIterator);
+  // Jekyll's override calls Hash#sort directly. Chirpy's categories.html
+  // does `{% assign sort_categories = site.categories | sort %}` then
+  // `category | first` (name) / `category | last` (posts).
+  test('sort(Hash) -> [[key, value], ...] sorted by key', async () => {
+    const out = await renderFilter(
+      '{% assign s = h | sort %}{% for p in s %}[{{ p | first }}:{{ p | last | size }}]{% endfor %}',
+      { h: { Demo: [3], Blogging: [1, 2] } }
+    );
+    expect(out).toBe('[Blogging:2][Demo:1]');
+  });
+
+  test('sort on arrays still works', async () => {
+    const out = await renderFilter('{{ a | sort | join: "," }}', { a: [3, 1, 2] });
+    expect(out).toBe('1,2,3');
   });
 });

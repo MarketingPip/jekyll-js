@@ -114,7 +114,7 @@ function processSourceMap(rawMap, assetPath) {
  * `sass.sourcemap: none` disables; `always` forces; otherwise (default
  * `development`) maps are written only when NOT in production.
  */
-function wantSourceMap(config, env = 'development') {
+export function wantSourceMap(config, env = 'development') {
   // Mirrors jekyll-sass-converter#sourcemap_required? exactly:
   // default :always; :never disables; :development maps only in development.
   const sm = config?.sass?.sourcemap;

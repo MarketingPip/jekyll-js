@@ -19,6 +19,8 @@
  */
 
 import { TokenKind, Context } from 'liquidjs';
+import { patchBlankBlockSkipping } from './liquidBlankBlocks.js';
+import { SEO_TAG_TEMPLATE } from './seoTagTemplate.js';
 
 // ─── Ruby Liquid string-indexing parity ─────────────────────────────────────
 // Ruby Liquid (variable_lookup.rb): a String does not respond to `key?` or
@@ -202,33 +204,84 @@ function registerPostUrlTag(engine) {
 }
 
 // ─── {% seo %} tag ──────────────────────────────────────────────────────────
-// A faithful (not no-op) implementation of the most load-bearing parts of
-// the jekyll-seo-tag plugin, grounded directly in the real gem's
-// lib/jekyll-seo-tag/drop.rb and lib/template.html (read from the installed gem).
-// minima's _includes/head.html relies ENTIRELY on {% seo %} for the page's
-// <title> tag -- there is no other fallback anywhere in the layout chain
-// -- so treating this as a pure no-op silently produces titleless pages,
-// which is a real and meaningful gap, not a cosmetic one.
+// Faithful jekyll-seo-tag 2.9.1 port: renders the gem's own lib/template.html
+// (vendored in ./seoTagTemplate.js, minified with the gem's MINIFY_REGEX)
+// through LiquidJS, driven by a drop implementing the gem's Drop (drop.rb),
+// AuthorDrop (author_drop.rb), ImageDrop (image_drop.rb) and JSONLDDrop
+// (json_ld_drop.rb). Grounded in the installed jekyll-seo-tag-2.9.1 gem.
 //
-// Implemented (verified against real Drop#title/#description logic):
-//   <title>            -- exact algorithm: page_title vs site_title
-//                          combination with " | " separator
-//   <meta name="generator">
-//   <meta property="og:title">, <meta name="description">,
-//   <meta property="og:description">, <link rel="canonical">,
-//   <meta property="og:url">, <meta property="og:type">
-//   <meta property="og:site_name">
-//   Twitter card meta (summary / summary_large_image)
-//   og:image, og:image:width, og:image:height, og:image:alt
-//   JSON-LD structured data script tag
-//   Author meta
-//   Webmaster verification tags (google, bing, alexa, yandex, baidu, facebook)
-//   Facebook meta (admins, publisher, app_id)
-//
-// The implementation mirrors the real jekyll-seo-tag 2.8.0 template.html
-// and the Drop class logic from drop.rb, author_drop.rb, image_drop.rb,
-// json_ld_drop.rb, and url_helper.rb.
-function registerSeoTag(engine) {
+// 2.8.0 -> 2.9.1 deltas covered (all oracle-verified):
+// - version v2.9.1; title=false / canonical=false text switches
+// - description: format_string (markdownify/strip_html/normalize_whitespace/
+//   escape_once) + snippet() truncation to seo_description_max_words (100)
+// - name: page seo[name], else homepage social.name, else site title
+// - date_modified (page seo[date_modified] || last_modified_at || date)
+//   and the article:modified_time meta tag
+// - dates via date_to_xmlschema (site.timezone), never toISOString
+// - canonical/og:url emitted whenever site.url is not nil ("" counts --
+//   Ruby Liquid truthiness, not JS truthiness)
+// - JSON-LD keys sorted alphabetically (JSONLDDrop#to_json sorts)
+// - twitter:creator nested inside the site.twitter guard
+// - seo_json_escape on the JSON-LD payload
+
+// jekyll-seo-tag 2.9.1 format_string helpers (drop.rb FORMAT_STRING_METHODS:
+// markdownify, strip_html, normalize_whitespace, escape_once)
+function seoStripHtml(s) {
+  return String(s ?? '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<\/?[^>]+>/g, '');
+}
+function seoNormalizeWhitespace(s) {
+  return String(s ?? '').replace(/\s+/g, ' ').trim();
+}
+function seoEscapeOnce(s) {
+  return String(s ?? '')
+    .replace(/&(?!(?:[a-zA-Z][a-zA-Z0-9]+|#[0-9]+|#x[0-9a-fA-F]+);)/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+// drop.rb #snippet: first maxWords whitespace-separated words + "…" if cut
+function seoSnippet(s, maxWords) {
+  if (s == null) return s;
+  const str = String(s);
+  const words = str.split(/\s+/);
+  if (words.length <= maxWords) return str;
+  return words.slice(0, maxWords).join(' ') + '…';
+}
+// json_filters.rb JSON_ESCAPE
+const SEO_JSON_ESCAPES = {
+  '<': '\\u003c',
+  '>': '\\u003e',
+  '&': '\\u0026',
+  '\u2028': '\\u2028',
+  '\u2029': '\\u2029',
+};
+function seoJsonEscape(s) {
+  return String(s ?? '').replace(/[<>&\u2028\u2029]/g, (c) => SEO_JSON_ESCAPES[c]);
+}
+function seoIsAbsoluteUrl(s) {
+  return /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(String(s || ''));
+}
+// Jekyll's URI escape for image/logo paths (conservative: encodeURI leaves
+// ;,/?:@&=+$,# unescaped, matching Addressable for typical asset paths)
+function seoUriEscape(s) {
+  return encodeURI(String(s ?? '')).replace(/#/g, '%23');
+}
+
+function registerSeoTag(engine, opts = {}) {
+  const markdownify = opts.markdownify || ((s) => String(s ?? ''));
+  const dateToXmlschema = opts.dateToXmlschema || ((s) => String(s ?? ''));
+  const absoluteUrl = opts.absoluteUrl || ((u) => String(u ?? ''));
+  // drop.rb #format_string
+  const formatString = (s) => {
+    if (s == null) return null;
+    const out = seoEscapeOnce(seoNormalizeWhitespace(seoStripHtml(markdownify(String(s)))));
+    return out === '' ? null : out;
+  };
+
   engine.registerTag('seo', {
     parse(tagToken) {
       this.raw = tagToken.args || '';
@@ -239,302 +292,204 @@ function registerSeoTag(engine) {
       const jekyll = ctx.get(['jekyll']) || {};
       const paginator = ctx.get(['paginator']) || null;
 
-      const siteTitle = site.title || site.name;
-      const pageTitle = page.title || siteTitle;
-      const siteTaglineOrDescription = site.tagline || site.description;
+      const pageSeo = page.seo && typeof page.seo === 'object' ? page.seo : {};
+      const siteSocial =
+        site.social && typeof site.social === 'object' ? site.social : {};
+      const homepageOrAbout = /^\/(about\/)?(index\.html?)?$/.test(page.url || '');
 
+      const siteTitle = formatString(site.title || site.name);
+      const siteDescription = formatString(site.description);
+      const siteTagline = formatString(site.tagline);
+
+      // Drop#page_title (with title_category support)
+      let pageTitle;
+      {
+        const t = formatString(page.title);
+        const tc = formatString(page.title_category);
+        pageTitle = t && tc && t !== tc ? `${t} | ${tc}` : t || tc || siteTitle;
+      }
+
+      // Drop#title (with paginator page_number prefix)
       let title;
       if (siteTitle && pageTitle !== siteTitle) {
         title = `${pageTitle} | ${siteTitle}`;
-      } else if (site.description && siteTitle) {
-        title = `${siteTitle} | ${siteTaglineOrDescription}`;
+      } else if (siteDescription && siteTitle) {
+        title = `${siteTitle} | ${siteTagline || siteDescription}`;
       } else {
         title = pageTitle || siteTitle;
       }
-
-      const description = page.description || page.excerpt || site.description;
-      const showTitle = !/title=false/i.test(this.raw) && !!title;
-
-      // Image handling (mirrors ImageDrop logic)
-      let imagePath = null;
-      let imageWidth = null;
-      let imageHeight = null;
-      let imageAlt = null;
-      if (page.image) {
-        if (typeof page.image === 'string') {
-          imagePath = page.image;
-        } else if (typeof page.image === 'object') {
-          imagePath = page.image.path || page.image.facebook || page.image.twitter;
-          imageWidth = page.image.width;
-          imageHeight = page.image.height;
-          imageAlt = page.image.alt;
-        }
+      if (paginator && paginator.page > 1 && title) {
+        const msg = site.seo_paginator_message || 'Page %<current>s of %<total>s for ';
+        title =
+          msg
+            .replace('%<current>s', String(paginator.page))
+            .replace('%<total>s', String(paginator.total_pages)) + title;
       }
 
-      // Author handling (mirrors AuthorDrop logic, author_drop.rb)
-      // Resolved author sources (in order): page.author,
-      // page.authors.first, site.author. A string author is also looked
-      // up in site.data.authors for metadata (not needed here).
-      let authorName = null;
-      let authorTwitter = null;
+      // AuthorDrop (author_drop.rb): page.author, page.authors.first,
+      // site.author; a string author merges site.data.authors metadata.
+      const authorDrop = { name: null, twitter: null };
       {
         const authorsArray = Array.isArray(page.authors) ? page.authors[0] : undefined;
-        const resolvedAuthor = [page.author, authorsArray, site.author].find(
+        const resolved = [page.author, authorsArray, site.author].find(
           (a) => a !== undefined && a !== null && String(a) !== ''
         );
-        if (resolvedAuthor !== undefined) {
-          let authorHash = null;
-          if (typeof resolvedAuthor === 'string') {
-            authorName = resolvedAuthor;
-          } else if (typeof resolvedAuthor === 'object') {
-            authorHash = resolvedAuthor;
-            authorName = resolvedAuthor.name;
+        let hash = {};
+        if (resolved && typeof resolved === 'object') {
+          hash = resolved;
+        } else if (typeof resolved === 'string') {
+          hash = { name: resolved };
+          const dataAuthors = site.data && site.data.authors;
+          if (dataAuthors && typeof dataAuthors === 'object') {
+            const meta = dataAuthors[resolved];
+            if (meta && typeof meta === 'object') hash = { ...hash, ...meta };
           }
-          // AuthorDrop#twitter: author_hash["twitter"] || author_hash["name"],
-          // with a leading @ stripped (template re-adds it).
-          const rawTwitter = (authorHash && authorHash.twitter) || authorName;
-          if (typeof rawTwitter === 'string' && rawTwitter !== '') {
-            authorTwitter = rawTwitter.replace(/^@/, '');
-          }
+        }
+        if (hash.name) {
+          authorDrop.name = String(hash.name);
+          const tw = hash.twitter || hash.name;
+          authorDrop.twitter =
+            typeof tw === 'string' && tw !== '' ? tw.replace(/^@/, '') : null;
+          if (hash.type) authorDrop.type = hash.type;
+          if (hash.url) authorDrop.url = hash.url;
         }
       }
 
-      // JSON-LD generation (mirrors JSONLDDrop logic)
-      function buildJsonLd() {
-        // FIX (oracle-found): Field order and values must match the real
-        // jekyll-seo-tag 2.8.0 gem exactly. For WebSite type:
-        // - order: @context, @type, description, headline, name, url
-        // - name is the SITE title, not page title
-        const jsonLd = {
-          '@context': 'https://schema.org',
-        };
+      // Drop#description: format_string(page.description || page.excerpt) ||
+      // site_description, truncated to seo_description_max_words (100)
+      const description = seoSnippet(
+        formatString(page.description || page.excerpt) || siteDescription,
+        page.seo_description_max_words || 100
+      );
 
-        // @type — Drop#type precedence (drop.rb): page_seo["type"],
-        // then homepage_or_about?, then page["date"], else "WebPage".
-        // FIX (theme drift): homepage check must come BEFORE the date
-        // check (an /about/ page with a date is still WebSite), and
-        // `seo.type` front matter overrides the computed type.
-        const pageSeo = page.seo && typeof page.seo === 'object' ? page.seo : {};
-        let type;
-        if (pageSeo.type) {
-          type = pageSeo.type;
-        } else if (/^\/(about\/)?(index\.html?)?$/.test(page.url || '')) {
-          // FIX (oracle-found): real gem uses HOMEPAGE_OR_ABOUT_REGEX =
-          // /^/(about/)?(index.html?)?$/ — matches /,/index.html,/about/,/about/index.html
-          // but NOT /about.html (without trailing slash)
-          type = 'WebSite';
-        } else if (page.date) {
-          type = 'BlogPosting';
+      // Drop#name: seo_name, else homepage social.name, else site title
+      const seoName = pageSeo.name ? formatString(pageSeo.name) : null;
+      const name =
+        seoName ||
+        (!homepageOrAbout
+          ? null
+          : siteSocial.name
+            ? formatString(siteSocial.name)
+            : siteTitle);
+
+      // Drop#canonical_url
+      const canonicalUrl =
+        page.canonical_url && String(page.canonical_url) !== ''
+          ? page.canonical_url
+          : absoluteUrl(page.url || '').replace(/\/index\.html$/, '/');
+
+      // ImageDrop (image_drop.rb): {"path" => nil}.merge!(image_meta) for a
+      // hash (ALL keys preserved), {"path" => image_meta} for a string.
+      let imageDrop = null;
+      {
+        const meta = page.image;
+        let imageHash;
+        if (meta && typeof meta === 'object') imageHash = { path: null, ...meta };
+        else if (typeof meta === 'string') imageHash = { path: meta };
+        else imageHash = { path: null };
+        const rawPath = imageHash.path || imageHash.facebook || imageHash.twitter;
+        if (rawPath) {
+          const absPath = seoIsAbsoluteUrl(rawPath)
+            ? rawPath
+            : absoluteUrl(rawPath);
+          // Preserve every image_meta key (lqip, height, width, alt, ...),
+          // replacing path with the absolute URI-escaped URL.
+          imageDrop = { ...imageHash, path: seoUriEscape(absPath) };
+        }
+      }
+
+      // Drop#date_published / #date_modified (formatted via date_to_xmlschema;
+      // the template re-applies the filter, which is idempotent)
+      const datePublished = page.date ? dateToXmlschema(page.date) || null : null;
+      const dateModifiedRaw = pageSeo.date_modified || page.last_modified_at || page.date;
+      const dateModified = dateModifiedRaw ? dateToXmlschema(dateModifiedRaw) || null : null;
+
+      // Drop#type
+      const type = pageSeo.type || (homepageOrAbout ? 'WebSite' : page.date ? 'BlogPosting' : 'WebPage');
+
+      // Drop#links
+      const links = pageSeo.links || (homepageOrAbout && siteSocial.links) || null;
+
+      // Drop#logo
+      let logoUrl = null;
+      if (site.logo) {
+        const rawLogo = String(site.logo);
+        logoUrl = seoUriEscape(seoIsAbsoluteUrl(rawLogo) ? rawLogo : absoluteUrl(rawLogo));
+      }
+
+      // JSONLDDrop (json_ld_drop.rb): delegators + to_json sorts keys
+      const jsonLd = { '@context': 'https://schema.org', '@type': type };
+      jsonLd['url'] = canonicalUrl;
+      if (dateModified) jsonLd['dateModified'] = dateModified;
+      if (datePublished) jsonLd['datePublished'] = datePublished;
+      if (description) jsonLd['description'] = String(description);
+      if (pageTitle) jsonLd['headline'] = String(pageTitle);
+      if (imageDrop) {
+        if (Object.keys(imageDrop).length === 1) {
+          jsonLd['image'] = imageDrop.path;
         } else {
-          type = 'WebPage';
+          const h = { ...imageDrop, url: imageDrop.path, '@type': 'imageObject' };
+          delete h.path;
+          jsonLd['image'] = h;
         }
-        jsonLd['@type'] = type;
-
-        // description (before headline/name, per real gem)
-        // FIX (theme drift): JSON-LD string fields must be strings —
-        // the gem's format_string (markdownify/strip_html) stringifies
-        // non-string front matter (e.g. integer `title: 404`), so
-        // "headline":404 (invalid JSON) can never occur.
-        if (description) jsonLd.description = String(description);
-
-        // headline (page title)
-        if (pageTitle) jsonLd.headline = String(pageTitle);
-
-        // name: only for WebSite (homepage/about). Real gem returns nil
-        // for other pages (drop.rb:76-87).
-        if (type === 'WebSite') {
-          if (site.title) jsonLd.name = String(site.title);
-        }
-
-        // url (canonical) - real gem always outputs, even without site.url
-        // (absolute_url returns just the path if no base URL configured)
-        {
-          const canonical = (site.url || '') + (site.baseurl || '') + (page.url || '');
-          // Real gem: filters.absolute_url(page["url"]).gsub(/\/index\.html$/, "/")
-          const normalized = canonical.replace(/\/index\.html$/, '/') || '/';
-          jsonLd.url = normalized;
-        }
-
-        // datePublished / dateModified
-        if (page.date) {
-          const datePublished = new Date(page.date).toISOString();
-          jsonLd.datePublished = datePublished;
-        }
-
-        // author
-        if (authorName) {
-          jsonLd.author = {
-            '@type': 'Person',
-            name: String(authorName),
-          };
-        }
-
-        // image
-        if (imagePath) {
-          jsonLd.image = String(imagePath);
-        }
-
-        // publisher (if logo)
-        if (site.logo) {
-          jsonLd.publisher = {
-            '@type': 'Organization',
-            logo: {
-              '@type': 'ImageObject',
-              url: site.logo,
-            },
-          };
-          if (authorName) jsonLd.publisher.name = String(authorName);
-        }
-
-        // mainEntityOfPage
-        if (type === 'BlogPosting' || type === 'CreativeWork') {
-          jsonLd.mainEntityOfPage = {
-            '@type': 'WebPage',
-            '@id': jsonLd.url,
-          };
-        }
-
-        // sameAs (links)
-        const links = (site.social && site.social.links) || [];
-        if (links.length > 0) {
-          jsonLd.sameAs = links;
-        }
-
-        return jsonLd;
       }
+      if (logoUrl) {
+        jsonLd['publisher'] = {
+          '@type': 'Organization',
+          logo: { '@type': 'ImageObject', url: logoUrl },
+        };
+        if (authorDrop.name) jsonLd['publisher']['name'] = authorDrop.name;
+      }
+      if (type === 'BlogPosting' || type === 'CreativeWork') {
+        jsonLd['mainEntityOfPage'] = { '@type': 'WebPage', '@id': canonicalUrl };
+      }
+      if (name) jsonLd['name'] = String(name);
+      if (authorDrop.name) {
+        const a = { '@type': authorDrop.type || 'Person', name: authorDrop.name };
+        if (authorDrop.url) a['url'] = authorDrop.url;
+        jsonLd['author'] = a;
+      }
+      if (links) jsonLd['sameAs'] = links;
+      // Ruby: keys.sort.each_with_object (alphabetical, nils omitted)
+      const sortedJsonLd = {};
+      for (const k of Object.keys(jsonLd).sort()) sortedJsonLd[k] = jsonLd[k];
 
-      const jsonLd = buildJsonLd();
-      const jsonLdString = JSON.stringify(jsonLd, null, 0);
-
-      // FIX (oracle-found): SEO tag version is the gem version (2.8.0),
-      // not the Jekyll version. The real gem hardcodes this.
-      const lines = [`<!-- Begin Jekyll SEO tag v2.8.0 -->`];
-
-      // Title
-      if (showTitle) lines.push(`<title>${escapeHtml(stripHtml(title))}</title>`);
-
-      // Generator
-      lines.push(`<meta name="generator" content="Jekyll v${jekyll.version || '4.3.4'}" />`);
-
-      // og:title
-      if (pageTitle) lines.push(`<meta property="og:title" content="${escapeHtml(stripHtml(pageTitle))}" />`);
-
-      // Author name meta
-      if (authorName) lines.push(`<meta name="author" content="${escapeHtml(stripHtml(authorName))}" />`);
-
-      // og:locale
       const pageLang = page.lang || site.lang || 'en_US';
-      const pageLocale = (page.locale || site.locale || pageLang).replace('-', '_');
-      lines.push(`<meta property="og:locale" content="${pageLocale}" />`);
 
-      // Description
-      if (description) {
-        const d = escapeHtml(stripHtml(description));
-        lines.push(`<meta name="description" content="${d}" />`);
-        // FIX (seo-tag quirk): real jekyll-seo-tag emits twitter:description
-        // with BOTH name and property attributes on the same tag
-        lines.push(`<meta name="twitter:description" property="og:description" content="${d}" />`);
-      }
+      const drop = {
+        version: '2.9.1',
+        'title?': !!title && !/title=false/i.test(this.raw),
+        'canonical?': !/canonical=false/i.test(this.raw),
+        title: title || null,
+        page_title: pageTitle || null,
+        author: authorDrop,
+        page_locale: (page.locale || site.locale || pageLang).replace(/-/g, '_'),
+        description: description || null,
+        site_title: siteTitle || null,
+        canonical_url: canonicalUrl,
+        image: imageDrop,
+        date_published: datePublished,
+        date_modified: dateModified,
+        json_ld: sortedJsonLd,
+      };
 
-      // Canonical URL and og:url
-      if (site.url) {
-        const canonical = (site.url || '') + (site.baseurl || '') + (page.url || '');
-        lines.push(`<link rel="canonical" href="${canonical}" />`);
-        lines.push(`<meta property="og:url" content="${canonical}" />`);
-      }
-
-      // og:site_name
-      if (siteTitle) lines.push(`<meta property="og:site_name" content="${escapeHtml(stripHtml(siteTitle))}" />`);
-
-      // og:type
-      if (page.date) {
-        lines.push(`<meta property="og:type" content="article" />`);
-        const datePublished = new Date(page.date).toISOString();
-        lines.push(`<meta property="article:published_time" content="${datePublished}" />`);
-      } else {
-        lines.push(`<meta property="og:type" content="website" />`);
-      }
-
-      // Pagination prev/next
-      if (paginator) {
-        if (paginator.previous_page) {
-          const prevUrl = (site.url || '') + (site.baseurl || '') + (paginator.previous_page_path || '');
-          lines.push(`<link rel="prev" href="${prevUrl}" />`);
-        }
-        if (paginator.next_page) {
-          const nextUrl = (site.url || '') + (site.baseurl || '') + (paginator.next_page_path || '');
-          lines.push(`<link rel="next" href="${nextUrl}" />`);
-        }
-      }
-
-      // Image meta
-      if (imagePath) {
-        lines.push(`<meta property="og:image" content="${escapeHtml(imagePath)}" />`);
-        if (imageHeight) lines.push(`<meta property="og:image:height" content="${imageHeight}" />`);
-        if (imageWidth) lines.push(`<meta property="og:image:width" content="${imageWidth}" />`);
-        if (imageAlt) lines.push(`<meta property="og:image:alt" content="${escapeHtml(stripHtml(imageAlt))}" />`);
-      }
-
-      // Twitter cards
-      if (imagePath) {
-        const twitterCard = page.twitter?.card || site.twitter?.card || 'summary_large_image';
-        lines.push(`<meta name="twitter:card" content="${twitterCard}" />`);
-        // FIX (theme drift): real gem template.html uses name= for
-        // twitter:image (and twitter:title), not property=.
-        lines.push(`<meta name="twitter:image" content="${escapeHtml(imagePath)}" />`);
-      } else {
-        lines.push(`<meta name="twitter:card" content="summary" />`);
-      }
-      if (imageAlt) lines.push(`<meta name="twitter:image:alt" content="${escapeHtml(stripHtml(imageAlt))}" />`);
-      // FIX (theme drift): real gem emits <meta name="twitter:title" ...>.
-      if (pageTitle) lines.push(`<meta name="twitter:title" content="${escapeHtml(stripHtml(pageTitle))}" />`);
-
-      // Twitter site/creator
-      if (site.twitter?.username) {
-        const twitterSite = site.twitter.username.replace('@', '');
-        lines.push(`<meta name="twitter:site" content="@${twitterSite}" />`);
-      }
-      if (authorTwitter) {
-        // authorTwitter is already stripped of a leading @ (AuthorDrop#twitter);
-        // the template re-adds it. Falls back to the author name when no
-        // twitter handle is configured (drop.rb/author_drop.rb).
-        lines.push(`<meta name="twitter:creator" content="@${authorTwitter}" />`);
-      }
-
-      // Facebook meta
-      if (site.facebook) {
-        if (site.facebook.admins) lines.push(`<meta property="fb:admins" content="${site.facebook.admins}" />`);
-        if (site.facebook.publisher) lines.push(`<meta property="article:publisher" content="${site.facebook.publisher}" />`);
-        if (site.facebook.app_id) lines.push(`<meta property="fb:app_id" content="${site.facebook.app_id}" />`);
-      }
-
-      // Webmaster verifications
-      const webmaster = site.webmaster_verifications || {};
-      if (webmaster.google) lines.push(`<meta name="google-site-verification" content="${webmaster.google}" />`);
-      if (webmaster.bing) lines.push(`<meta name="msvalidate.01" content="${webmaster.bing}" />`);
-      if (webmaster.alexa) lines.push(`<meta name="alexaVerifyID" content="${webmaster.alexa}" />`);
-      if (webmaster.yandex) lines.push(`<meta name="yandex-verification" content="${webmaster.yandex}" />`);
-      if (webmaster.baidu) lines.push(`<meta name="baidu-site-verification" content="${webmaster.baidu}" />`);
-      if (webmaster.facebook) lines.push(`<meta name="facebook-domain-verification" content="${webmaster.facebook}" />`);
-      // Legacy google_site_verification
-      else if (site.google_site_verification) {
-        lines.push(`<meta name="google-site-verification" content="${site.google_site_verification}" />`);
-      }
-
-      // JSON-LD structured data
-      // FIX (oracle-found): real gem outputs compact JSON on one line,
-      // with </script> on the same line as the JSON.
-      lines.push(`<script type="application/ld+json">`);
-      lines.push(`${jsonLdString}</script>`);
-
-      lines.push(`<!-- End Jekyll SEO tag -->`);
+      // Render the gem's own template, exactly like jekyll-seo-tag.rb #render
+      // (which minifies + renders lib/template.html through Ruby Liquid).
+      const html = await engine.parseAndRender(SEO_TAG_TEMPLATE, {
+        seo_tag: drop,
+        site,
+        page,
+        paginator,
+        jekyll,
+      });
       // FIX (oracle-found): real gem's output ends with a newline,
       // so </head> starts on a new line.
-      return lines.join('\n') + '\n';
+      return html.endsWith('\n') ? html : html + '\n';
     },
   });
 }
 
+// (used by feed_meta tag)
 function stripHtml(str) {
   return String(str).replace(/<\/?[^>]+>/g, '');
 }
@@ -624,7 +579,27 @@ function registerPluginStubs(engine) {
 }
 
 // ─── filter fixes ───────────────────────────────────────────────────────────
-function registerFilterFixes(engine) {
+function registerFilterFixes(engine, opts = {}) {
+  // FIX (Jekyll::Filters#sort parity): Jekyll 4.3.4 overrides Liquid's sort
+  // (lib/jekyll/filters.rb): `input.sort` with no property -- and Ruby's
+  // Hash#sort returns [[key, value], ...] pairs sorted by key. LiquidJS wraps
+  // a hash as [hash] instead. Chirpy's categories.html depends on the Ruby
+  // behavior: `{% assign sort_categories = site.categories | sort %}` then
+  // `category | first` (name) / `category | last` (posts).
+  const origSort = engine.filters.sort;
+  engine.registerFilter('sort', function (input, property) {
+    if (
+      property == null &&
+      input !== null &&
+      typeof input === 'object' &&
+      !Array.isArray(input)
+    ) {
+      return Object.entries(input).sort((a, b) =>
+        a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
+      );
+    }
+    return origSort.call(this, input, property);
+  });
   // FIX: Ruby Liquid's truncatewords returns the input UNCHANGED (newlines
   // preserved) when word count <= limit, and appends "..." only when
   // wordlist.length > words. LiquidJS always splits/joins (collapsing
@@ -718,11 +693,19 @@ function registerFilterFixes(engine) {
   // leading whitespace (" a  b ".split(" ") -> ["a","b"]). LiquidJS split on
   // the literal single space (" a  b " -> ["","a","","b",""]). Other
   // separators keep Ruby's trailing-empty-field drop (as LiquidJS did).
+  // Ruby's "whitespace" here is ASCII-only [ \t\r\n\f\v]: U+00A0 (nbsp) is
+  // NOT split or stripped ("a\u00a0b".split(" ") -> ["a\u00a0b"], verified live).
+  // JS /\s+/ and String#trim() both treat U+00A0 as whitespace, which broke
+  // just-the-docs footnote backlinks (kramdown emits U+00A0; the compress
+  // layout's `split: " " | join: " "` turned it into a regular space).
   engine.registerFilter('split', (input, separator) => {
     const str = input == null ? '' : String(input);
     if (separator === ' ') {
-      const trimmed = str.trim();
-      return trimmed === '' ? [] : trimmed.split(/\s+/);
+      const trimmed = str.replace(/^[ \t\r\n\f\v]+/, '');
+      if (trimmed === '') return [];
+      const parts = trimmed.split(/[ \t\r\n\f\v]+/);
+      while (parts.length && parts[parts.length - 1] === '') parts.pop();
+      return parts;
     }
     const parts = str.split(separator == null ? undefined : String(separator));
     while (parts.length && parts[parts.length - 1] === '') parts.pop();
@@ -775,6 +758,57 @@ function registerFilterFixes(engine) {
       return list.some((p) => String(p) === target);
     });
   });
+
+  // FIX (Ruby Time#to_json parity): Jekyll's `{{ post.date | jsonify }}` emits
+  // Ruby's Time#to_s format ("2019-08-11 00:34:00 +0800"), not ISO 8601.
+  // LiquidJS's jsonify uses JSON.stringify (ISO). Override to format Date
+  // objects in site.timezone like Ruby.
+  const getTimezone = opts.getTimezone || (() => 'UTC');
+  const formatRubyTime = (value) => {
+    // Ruby Time#to_s: "%Y-%m-%d %H:%M:%S %z" in site timezone
+    const tz = getTimezone() || 'UTC';
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+    const parts = Object.fromEntries(
+      fmt.formatToParts(value).map((p) => [p.type, p.value])
+    );
+    const utcFmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false,
+      timeZoneName: 'shortOffset',
+    });
+    const tzName = utcFmt.formatToParts(value).find((p) => p.type === 'timeZoneName')?.value || 'GMT';
+    const m = tzName.match(/GMT([+-])(\d+)(?::(\d+))?/);
+    let offset = '+0000';
+    if (m) {
+      const sign = m[1];
+      const hh = String(m[2]).padStart(2, '0');
+      const mm = String(m[3] || '0').padStart(2, '0');
+      offset = `${sign}${hh}${mm}`;
+    }
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} ${offset}`;
+  };
+  engine.registerFilter('jsonify', function (input) {
+    // JSON.stringify calls Date#toJSON before the replacer; handle top-level
+    // Dates directly, nested Dates via a toJSON-suppressing replacer.
+    if (input instanceof Date) return JSON.stringify(formatRubyTime(input));
+    const replacer = (key, value) => {
+      if (this instanceof Date) return formatRubyTime(this);
+      return value;
+    };
+    // Temporarily suppress Date#toJSON so the replacer sees Date objects.
+    const origToJSON = Date.prototype.toJSON;
+    Date.prototype.toJSON = undefined;
+    try {
+      return JSON.stringify(input, replacer);
+    } finally {
+      Date.prototype.toJSON = origToJSON;
+    }
+  });
 }
 
 // ─── filter-fix helpers ─────────────────────────────────────────────────────
@@ -814,11 +848,18 @@ export function registerJekyllExtensions(liquidEngine, opts = {}) {
   registerHighlightTag(liquidEngine, opts.highlighter);
   registerLinkTag(liquidEngine);
   registerPostUrlTag(liquidEngine);
-  registerSeoTag(liquidEngine);
+  registerSeoTag(liquidEngine, opts);
+  liquidEngine.registerFilter('seo_json_escape', seoJsonEscape);
   registerFeedMetaTag(liquidEngine);
   registerIncludeCachedTag(liquidEngine, opts);
   registerPluginStubs(liquidEngine);
-  registerFilterFixes(liquidEngine);
+  registerFilterFixes(liquidEngine, opts);
+  // FIX (blank-block skip): Ruby Liquid 4.0.4's BlockBody#render discards the
+  // output of any Block child whose static body is whitespace + non-output
+  // tags only (assign/capture/comment). LiquidJS renders that interior
+  // whitespace, causing stray blank/indented-empty lines vs real Jekyll
+  // (minimal-mistakes footer.html is the archetype). See liquidBlankBlocks.js.
+  patchBlankBlockSkipping(liquidEngine);
 }
 
 // ─── include_cached tag ─────────────────────────────────────────────────────
@@ -858,19 +899,26 @@ function registerIncludeCachedTag(engine, opts = {}) {
           `Make sure _includes/${this.file} exists.`
         );
       }
-      // Build include scope with params
+      // Build include scope with params.
+      // FIX (Jekyll include.rb #parse_params parity -- chirpy's
+      // `{% include_cached trending-tags.html lang=include.lang %}`):
+      // jekyll-include-cache subclasses Jekyll::Tags::Include, so params
+      // parse exactly like {% include %}: quoted values are literals, bare
+      // words are context lookups supporting dotted paths, and an
+      // unresolvable variable is nil -- never the literal text.
       const includeScope = {};
       for (const [k, v] of Object.entries(this.params)) {
         // Evaluate the value (could be a string literal or variable)
         if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
           includeScope[k] = v.slice(1, -1);
         } else {
-          // Try as variable lookup, fallback to raw
+          let val = null;
           try {
-            includeScope[k] = ctx.get([v]) ?? v;
+            val = ctx.get(v.split('.'));
           } catch {
-            includeScope[k] = v;
+            val = null;
           }
+          includeScope[k] = val === undefined ? null : val;
         }
       }
       // Render the include with the scope

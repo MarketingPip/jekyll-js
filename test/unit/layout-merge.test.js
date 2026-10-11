@@ -74,7 +74,11 @@ describe('layout merge chain', () => {
     expect(html).toContain('9|2|4');
   });
 
-  test('layout variable is the front matter of the layout being rendered at each level', async () => {
+  test('layout variable accumulates inner-first; inner layout data wins (renderer.rb #render_layout)', async () => {
+    // Grounding: real Jekyll 4.3.4 (verified live):
+    //   payload["layout"] = Utils.deep_merge_hashes(layout.data, payload["layout"] || {})
+    // so inside outer.html, layout.who is "inner" (inner wins), NOT "outer".
+    // Live oracle: <outer>inner|<inner>inner|<h1 id="hi">Hi</h1>...
     const engine = makeEngine({
       '_layouts/outer.html': FM('who: outer', '<outer>{{ layout.who }}|{{ content }}</outer>'),
       '_layouts/inner.html': FM('layout: outer\nwho: inner', '<inner>{{ layout.who }}|{{ content }}</inner>'),
@@ -83,7 +87,27 @@ describe('layout merge chain', () => {
     const pages = await engine.build();
     const html = pages.find((p) => p.permalink === '/').content;
     expect(html).toContain('<inner>inner|');
-    expect(html).toContain('<outer>outer|<inner>');
+    expect(html).toContain('<outer>inner|<inner>');
+  });
+
+  test('chirpy: layout.layout inside a layout sees the inner layout front matter', async () => {
+    // Chirpy's default.html: `{% if layout.layout == 'default' %}` must see
+    // page.html's `layout: default` front matter, not default.html's own
+    // `layout: compress` (real Jekyll renders the refactor-content include;
+    // the old code took the else branch and dropped the HTML comments).
+    const engine = makeEngine({
+      '_layouts/compress.html': FM('', '[{{ layout.layout }}]{{ content }}'),
+      '_layouts/default.html': FM(
+        'layout: compress',
+        "{% if layout.layout == 'default' %}YES{% else %}NO{% endif %}|{{ content }}"
+      ),
+      '_layouts/page.html': FM('layout: default', '<page>{{ content }}</page>'),
+      'index.md': FM('layout: page', '# Hi'),
+    });
+    const pages = await engine.build();
+    const html = pages.find((p) => p.permalink === '/').content;
+    expect(html).toContain('YES|<page>');
+    expect(html).toContain('[default]');
   });
 
   test('cyclic layouts do not hang', async () => {

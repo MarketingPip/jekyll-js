@@ -44,4 +44,37 @@ describe('include_cached tag', () => {
     const index = pages.find((p) => p.permalink === '/');
     expect(index.content).toContain('<footer>Footer</footer>');
   });
+
+  test('dotted variable params resolve (chirpy: lang=include.lang)', async () => {
+    // Grounding: jekyll-include-cache subclasses Jekyll::Tags::Include, so
+    // params parse exactly like {% include %} (include.rb #parse_params):
+    // bare words are context lookups supporting dotted paths, unresolvable
+    // -> nil (never the literal text). Chirpy's search-results.html does
+    // `{% include_cached trending-tags.html lang=include.lang %}`.
+    const engine = new JekyllEngine({
+      vfs: {
+        '_includes/t.html': '[{{ include.lang }}]',
+        '_includes/wrap.html': '{% include_cached t.html lang=include.lang %}',
+        'index.md': '---\n---\n{% include wrap.html lang="en" %}',
+      },
+    });
+    const pages = await engine.build();
+    const index = pages.find((p) => p.permalink === '/');
+    expect(index.content).toContain('[en]');
+    expect(index.content).not.toContain('include.lang');
+  });
+
+  test('unresolvable bare param -> nil, not the literal text', async () => {
+    // Jekyll include.rb #parse_params: `context[variable]` -> nil when the
+    // variable does not exist.
+    const engine = new JekyllEngine({
+      vfs: {
+        '_includes/t.html': '[{{ include.x | default: "NIL" }}]',
+        'index.md': '---\n---\n{% include_cached t.html x=undefined_var %}',
+      },
+    });
+    const pages = await engine.build();
+    const index = pages.find((p) => p.permalink === '/');
+    expect(index.content).toContain('[NIL]');
+  });
 });

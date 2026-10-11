@@ -17,7 +17,7 @@ import * as yaml from 'js-yaml';
 import fm from 'front-matter';
 import { registerJekyllExtensions } from './jekyllTags.js';
 import { preprocessConditionals } from './liquidPreprocess.js';
-import { isSassAsset, compileSassAsset } from './assetsPipeline.js';
+import { isSassAsset, compileSassAsset, wantSourceMap } from './assetsPipeline.js';
 import { isFeedEnabled, generateFeeds } from './jekyllFeed.js';
 import { isSitemapEnabled, generateSitemap, generateRobotsTxt } from './jekyllSitemap.js';
 import { redirectFromPlugin } from './jekyllRedirectFrom.js';
@@ -335,24 +335,66 @@ function parseMarkdown(md) {
   return mdParser.parse(String(md));
 }
 
-// FIX (oracle-found): real Jekyll interprets post dates as local midnight,
-// not UTC. `new Date("2026-01-02")` parses as UTC; we need local time.
-// This helper parses YYYY-MM-DD (and YYYY-MM-DD HH:MM:SS) as local.
-function parseLocalDate(dateStr) {
+// FIX (site.timezone): offset (minutes, positive east of UTC) of an IANA
+// timezone at a given instant. The host TZ cancels out of the difference,
+// so this is correct on any machine.
+function tzOffsetMinutesAt(ms, timezone) {
+  const inst = new Date(ms);
+  const tzDate = new Date(inst.toLocaleString('en-US', { timeZone: timezone }));
+  const utcDate = new Date(inst.toLocaleString('en-US', { timeZone: 'UTC' }));
+  return Math.round((tzDate - utcDate) / 60000);
+}
+
+// FIX (site.timezone): interpret a naive wall-clock date/time in the given
+// IANA timezone (Jekyll's `timezone:` config; Ruby's Time.parse runs in the
+// process TZ, which the oracle pins to the site timezone). Falls back to
+// host-local construction when no timezone is configured.
+function wallTimeToDate(y, mo0, d, h, mi, sec, timezone) {
+  if (!timezone) {
+    return new Date(y, mo0, d, h, mi, sec);
+  }
+  // Convert wall-clock-in-tz to an instant: guess UTC, then refine by the
+  // actual zone offset at the guess (converges across DST boundaries).
+  let ms = Date.UTC(y, mo0, d, h, mi, sec);
+  for (let i = 0; i < 3; i++) {
+    const next = Date.UTC(y, mo0, d, h, mi, sec) - tzOffsetMinutesAt(ms, timezone) * 60000;
+    if (next === ms) break;
+    ms = next;
+  }
+  return new Date(ms);
+}
+
+// FIX (oracle-found + site.timezone): real Jekyll interprets post dates as
+// wall time in the site timezone, not UTC. `new Date("2026-01-02")` parses
+// as UTC; we need site.timezone midnight. An explicit offset (Z, +0800,
+// +08:00) fixes the exact instant and is honored verbatim (Ruby's Time
+// keeps the parsed offset) -- the old code regex-matched the date/time
+// portion and silently DROPPED the offset, shifting every post by the
+// zone offset. Naive values (date-only or wall time) are interpreted in
+// `timezone` (site.timezone), falling back to host local.
+function parseLocalDate(dateStr, timezone) {
   if (!dateStr) return null;
   if (dateStr instanceof Date) return dateStr;
   const s = String(dateStr).trim();
-  // Match YYYY-MM-DD or YYYY-MM-DD HH:MM:SS
+  // Explicit zone (Z or ±HHMM / ±HH:MM): the instant is fully specified.
+  if (/(?:[zZ]|[+-]\d{2}:?\d{2})\s*$/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d;
+    // Unparseable with offset (e.g. "2019-08-08 +0800"): fall through and
+    // parse the wall-time portion below.
+  }
+  // Match YYYY-MM-DD or YYYY-MM-DD HH:MM:SS (naive wall time)
   const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
   if (m) {
     const [, y, mo, d, h = '0', mi = '0', sec = '0'] = m;
-    return new Date(
+    return wallTimeToDate(
       parseInt(y, 10),
       parseInt(mo, 10) - 1,
       parseInt(d, 10),
       parseInt(h, 10),
       parseInt(mi, 10),
-      parseInt(sec, 10)
+      parseInt(sec, 10),
+      timezone
     );
   }
   // Fallback: let Date parse it
@@ -392,10 +434,8 @@ function getDatePartsInTimezone(date, timezone) {
     });
     const parts = fmt.formatToParts(date);
     const get = (type) => parts.find((p) => p.type === type)?.value;
-    // Get offset by comparing UTC to timezone time
-    const tzDate = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
-    const utcDate = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
-    const offsetMinutes = Math.round((tzDate - utcDate) / 60000);
+    // Get offset by comparing UTC to timezone time (host TZ cancels out)
+    const offsetMinutes = tzOffsetMinutesAt(date.getTime(), timezone);
     const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     return {
       year: parseInt(get('year'), 10),
@@ -812,6 +852,11 @@ export class JekyllEngine {
     this._eventListeners = {};      // lifecycle events
     this._staticFiles = [];
     this._sassAssets = [];
+    // FIX (generated pages in site.pages): summaries of plugin-generated
+    // pages (see _populateGeneratedPageSummaries), populated in build()
+    // before the first _renderPage so Liquid's site.pages matches real
+    // Jekyll's generator-before-render order.
+    this._generatedPages = [];
     this.vfsTemplates = {};
     // A fresh scan invalidates the build-time rendered-content cache
     // (see _precomputeDocumentContent) -- entries are rebuilt below.
@@ -886,6 +931,15 @@ export class JekyllEngine {
       // P0 (parenthesized {% if %}): include_cached parses include content
       // itself, bypassing the FS choke point — hand it the preprocessor.
       preprocess: preprocessConditionals,
+      // jekyll-seo-tag 2.9.1 needs these engine services for its Drop:
+      // format_string's markdownify step, date_to_xmlschema for
+      // date_published/date_modified, and absolute_url for canonical_url.
+      markdownify: (input) => this._renderMarkdown(input),
+      dateToXmlschema: (input) => this.liquidEngine.filters.date_to_xmlschema(input),
+      absoluteUrl: (url) => computeAbsoluteUrl(url, this._config),
+      // jsonify needs site.timezone for Ruby Time#to_json format. Config
+      // loads after constructor, so pass a getter, not the value.
+      getTimezone: () => this._config?.timezone,
       getInclude: (filename) => {
         const cleanFile = this._resolveVfsPath(`_includes/${filename}`);
         // Also try without _includes/ prefix
@@ -1033,7 +1087,7 @@ export class JekyllEngine {
         if (input instanceof Date) {
           d = input;
         } else if (typeof input === 'string' || typeof input === 'number') {
-          d = parseLocalDate(input) || new Date(input);
+          d = parseLocalDate(input, this._config?.timezone) || new Date(input);
         } else {
           // Fall back to LiquidJS built-in for other types
           return this.liquidEngine.filters.date_to_xmlschema(input);
@@ -1062,7 +1116,7 @@ export class JekyllEngine {
         if (input instanceof Date) {
           d = input;
         } else if (typeof input === 'string' || typeof input === 'number') {
-          d = parseLocalDate(input) || new Date(input);
+          d = parseLocalDate(input, this._config?.timezone) || new Date(input);
         } else {
           return this.liquidEngine.filters.date_to_rfc822(input);
         }
@@ -1097,14 +1151,14 @@ export class JekyllEngine {
         } else if (typeof input === 'string' || typeof input === 'number') {
           // 'now' or 'today' keywords
           if (input === 'now' || input === 'today') d = new Date();
-          else d = parseLocalDate(input) || new Date(input);
+          else d = parseLocalDate(input, this._config?.timezone) || new Date(input);
         } else if (input == null) {
           return '';
         } else {
           // For other types (e.g. Drop objects), try to get a date value
           // Avoid infinite recursion: don't call this.liquidEngine.filters.date
           const val = input.toString ? input.toString() : String(input);
-          d = parseLocalDate(val) || new Date(val);
+          d = parseLocalDate(val, this._config?.timezone) || new Date(val);
         }
         if (!d || isNaN(d.getTime())) return input;
         if (!format) format = '%Y-%m-%d';
@@ -1380,11 +1434,9 @@ export class JekyllEngine {
         docs: docs.map((doc) => {
           const wrapped = { ...doc };
           wrapped.data = wrapped; // doc.data.categories === doc.categories
-          wrapped.date = doc._date
-            ? new Date(doc._date)
-            : doc.date
-              ? new Date(doc.date)
-              : null;
+          // FIX (site.timezone): parse like everywhere else -- explicit
+          // offsets honored, naive dates as wall time in site.timezone.
+          wrapped.date = parseLocalDate(doc._date ?? doc.date, this._config?.timezone);
           return wrapped;
         }),
       };
@@ -1413,6 +1465,11 @@ export class JekyllEngine {
     this._rootPages = [];
     this._staticFiles = [];
     this._sassAssets = [];
+    // FIX (generated pages in site.pages): summaries of plugin-generated
+    // pages (see _populateGeneratedPageSummaries), populated in build()
+    // before the first _renderPage so Liquid's site.pages matches real
+    // Jekyll's generator-before-render order.
+    this._generatedPages = [];
     this.vfsTemplates = {};
     // A fresh scan invalidates the build-time rendered-content cache
     // (see _precomputeDocumentContent) -- entries are rebuilt below.
@@ -1459,6 +1516,13 @@ export class JekyllEngine {
     const toList = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
     this._excludeList = [...DEFAULT_EXCLUDES, ...toList(userExclude)];
     this._includeList = [...DEFAULT_INCLUDES, ...toList(userInclude)];
+
+    // FIX (site.time singularity): real Jekyll's site.time is set ONCE at
+    // Site#initialize and reused for every undated document (Document#date
+    // falls back to site.time). Computing new Date() per file gives
+    // different milliseconds, breaking Document#<=> path tie-breaks for
+    // undated docs (they'd sort by scan order instead of path).
+    this._siteTime = this._config.time ? new Date(this._config.time) : new Date();
 
     for (const [path, content] of Object.entries(vfs)) {
       // Infrastructure is never excluded (Jekyll reads these directly,
@@ -1647,8 +1711,8 @@ export class JekyllEngine {
           // FIX (Document#date site.time fallback): real Jekyll's Document#date
           // is `data["date"] ||= site.time` (document.rb) -- undated docs date
           // to the build time, never to the wall clock at scan time.
-          const siteTime = this._config.time ? new Date(this._config.time) : new Date();
-          const docDate = attributes.date || parsePostFilename(fileBase)?.date || siteTime;
+          // this._siteTime is set once per useVFS (site.time singularity).
+          const docDate = attributes.date || parsePostFilename(fileBase)?.date || this._siteTime;
           // FIX (populate_title parity -- document.rb): slug/ext/title for
           // collection docs, exactly like posts get. Tabs rely on the
           // titleized slug for <title> and the sidebar nav labels.
@@ -1674,6 +1738,12 @@ export class JekyllEngine {
             docDate
           );
           this._collections[collectionName] ||= [];
+          // FIX (collection doc excerpt parity): real Jekyll builds an
+          // Excerpt for every document (document.rb), not just posts --
+          // excerpt_separator resolves front matter > site config >
+          // Jekyll's "\n\n" default, exactly like posts above.
+          const docExcerptSeparator =
+            attributes.excerpt_separator || this._config.excerpt_separator || '\n\n';
           this._collections[collectionName].push(
             // FIX (collection doc taxonomy parity): every document gets
             // array-valued categories/tags (Document#populate_categories/
@@ -1691,6 +1761,8 @@ export class JekyllEngine {
               _permalink: permalink,
               _relPath: relPath,
               _date: docDate,
+              _excerptSeparator: docExcerptSeparator,
+              _excerpt: this._renderMarkdown(extractExcerpt(body, docExcerptSeparator)),
             })
           );
         } catch (e) {
@@ -2033,7 +2105,27 @@ export class JekyllEngine {
     let attributes;
     let body;
     try {
-      ({ attributes, body } = fm(content));
+      const parsed = fm(content);
+      body = parsed.body;
+      // FIX (site.timezone): front-matter's bundled js-yaml 3.15 auto-converts
+      // naive timestamps (`date: 2019-08-08`) to Date objects as UTC, baking
+      // in the wrong instant before site.timezone can be applied (Ruby's
+      // Psych parses them as wall time in the process/site timezone, and an
+      // explicit offset fixes the exact instant). Re-parse the raw YAML block
+      // with js-yaml 5 -- which has no timestamp type, so every date stays a
+      // string for parseLocalDate to interpret (offset honored, naive as wall
+      // time in site.timezone). Merge keys keep resolving via
+      // YAML_MERGE_SCHEMA, same as data loads. Falls back to front-matter's
+      // own parse if js-yaml 5 rejects the block.
+      if (parsed.frontmatter != null && parsed.frontmatter !== '') {
+        try {
+          attributes = yaml.load(parsed.frontmatter, { schema: YAML_MERGE_SCHEMA }) || {};
+        } catch {
+          attributes = parsed.attributes;
+        }
+      } else {
+        attributes = parsed.attributes;
+      }
     } catch (e) {
       this.options.logger(`YAML Exception reading ${path}: ${e.message}`, 'warn');
       attributes = {};
@@ -2131,8 +2223,93 @@ export class JekyllEngine {
   // `this._rootPages` but never exposed to templates. `{% for page in
   // site.pages %}` returned nothing. They're now mapped the same way
   // collections are, with front matter parsed and a `url` resolved.
+  /**
+   * FIX (generated pages in site.pages): real Jekyll runs generators BEFORE
+   * rendering, so plugin-generated pages are visible in `site.pages` while
+   * templates render. The gems' generator order (all `priority :lowest`,
+   * executed in plugin order) is: jekyll-paginate (page2..N),
+   * jekyll-sitemap (sitemap.xml, then robots.txt), jekyll-feed (feed.xml,
+   * plus per-category feeds). The sass-converter's SourceMapPage is appended
+   * to site.pages during conversion (render phase), so it sorts last.
+   * Sass stylesheets themselves are real Pages (read by the reader), sorted
+   * by basename with the regular pages (`site.pages.sort_by!(&:name)` in
+   * Jekyll's reader.rb).
+   *
+   * Each entry is { summary: {path, url, ...frontMatter}, sortByName }.
+   * Called in build() after pagination is computed and before the first
+   * _renderPage, so _buildSiteContext() picks them up.
+   */
+  _populateGeneratedPageSummaries(pagination) {
+    const entries = [];
+    // Sass stylesheets: real Pages, sorted by basename with the rest.
+    for (const asset of this._sassAssets) {
+      const { attributes } = this._parseFrontMatter(asset.path, asset.content, 'pages');
+      entries.push({
+        summary: {
+          ...attributes,
+          path: asset.path,
+          // Mirrors sassToCssPermalink in assetsPipeline.js.
+          url: '/' + asset.path.replace(/\.(scss|sass)$/, '.css'),
+          content: '',
+        },
+        sortByName: true,
+      });
+    }
+    // jekyll-paginate: fresh Pages (no front matter data) for page 2..N.
+    if (pagination) {
+      for (let i = 1; i < pagination.pagers.length; i++) {
+        const pager = pagination.pagers[i];
+        entries.push({
+          summary: {
+            path: pager.page_path.replace(/^\//, '') + 'index.html',
+            url: pager.page_path,
+            content: '',
+          },
+          sortByName: false,
+        });
+      }
+    }
+    // jekyll-sitemap gem (lib/jekyll/jekyll-sitemap.rb #generate).
+    if (isSitemapEnabled(this._config)) {
+      entries.push({
+        summary: { path: 'sitemap.xml', url: '/sitemap.xml', content: '' },
+        sortByName: false,
+      });
+      entries.push({
+        summary: { path: 'robots.txt', url: '/robots.txt', content: '' },
+        sortByName: false,
+      });
+    }
+    // jekyll-feed gem (lib/jekyll-feed/generator.rb #generate).
+    if (isFeedEnabled(this._config)) {
+      entries.push({
+        summary: { path: 'feed.xml', url: '/feed.xml', content: '' },
+        sortByName: false,
+      });
+      for (const category of this._config.feed?.categories || []) {
+        entries.push({
+          summary: { path: `feed/${category}.xml`, url: `/feed/${category}.xml`, content: '' },
+          sortByName: false,
+        });
+      }
+    }
+    // jekyll-sass-converter SourceMapPage (converters/scss.rb:260 — added
+    // to site.pages during conversion, i.e. after all generators ran).
+    if (this._sassAssets.length > 0 && this.options.sass &&
+        wantSourceMap(this._config, this.options.environment || 'development')) {
+      for (const asset of this._sassAssets) {
+        const mapUrl = '/' + asset.path.replace(/\.(scss|sass)$/, '.css') + '.map';
+        entries.push({
+          summary: { path: mapUrl.slice(1), url: mapUrl, content: '' },
+          sortByName: false,
+        });
+      }
+    }
+    this._generatedPages = entries;
+  }
+
   _buildRootPagesSummary() {
-    return this._rootPages.map((p) => {
+    const base = this._rootPages.map((p) => {
       const { attributes, body } = this._parseFrontMatter(p.path, p.content, 'pages');
       // FIX (oracle-found): match Jekyll's default /about.html URLs, not /about/.
       const permalinkStyle = this._config?.permalink || this._config?.permalink_style || '';
@@ -2177,6 +2354,27 @@ export class JekyllEngine {
           p._renderedContent ?? (/\.(md|markdown)$/i.test(p.path) ? this._renderMarkdown(body) : body),
       };
     });
+    // FIX (generated pages in site.pages): merge plugin-generated page
+    // summaries (populated by _populateGeneratedPageSummaries before the
+    // first render). Entries flagged sortByName (sass stylesheets — real
+    // Pages) sort by basename with the regular pages, mirroring Jekyll's
+    // `site.pages.sort_by!(&:name)`; generator pages (paginate, sitemap,
+    // robots, feed, sourcemap) append after, in generator execution order.
+    const generated = this._generatedPages || [];
+    if (generated.length === 0) return base;
+    const byBasename = (a, b) => {
+      const na = (a.path || '').split('/').pop();
+      const nb = (b.path || '').split('/').pop();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    };
+    const merged = [
+      ...base,
+      ...generated.filter((g) => g.sortByName).map((g) => g.summary),
+    ].sort(byBasename); // stable — existing order already matches
+    for (const g of generated) {
+      if (!g.sortByName) merged.push(g.summary);
+    }
+    return merged;
   }
 
   /**
@@ -2208,8 +2406,8 @@ export class JekyllEngine {
     const id = _permalink ? _permalink.replace(/\.html$/, '').replace(/\/$/, '') : '';
     // FIX (oracle-found): real Jekyll's post.date is a Time object with
     // local timezone. We were passing a string which LiquidJS parsed as UTC.
-    // Parse as local midnight for correct date_to_xmlschema output.
-    const dateObj = parseLocalDate(_date);
+    // Parse as wall time in site.timezone for correct date_to_xmlschema output.
+    const dateObj = parseLocalDate(_date, this._config?.timezone);
     return {
       ...rest,
       url: _permalink,
@@ -2251,18 +2449,48 @@ export class JekyllEngine {
    * fields cleaned up, rendered HTML as `content`).
    */
   _mapCollectionDoc(name, p) {
-    const { _body, _permalink, _relPath, _date, _renderedContent, content: _rawContent, ...rest } = p;
+    const {
+      _body,
+      _permalink,
+      _relPath,
+      _date,
+      _excerptSeparator,
+      _excerpt,
+      _renderedContent,
+      _renderedExcerpt,
+      content: _rawContent,
+      ...rest
+    } = p;
+    const url = (() => {
+      const u = _permalink || rest.permalink || `/${name}/${(_relPath || p.path).replace(/\.[^/.]+$/, '')}/`;
+      return u.replace(/\/index\/$/, '/');
+    })();
+    // FIX (doc.id): real Jekyll's Document#id (document.rb) =
+    // File.join(File.dirname(url), data["slug"] || basename_without_ext).
+    // Themes branch on its presence — e.g. minimal-mistakes'
+    // archive-single.html only markdownifies the title when post.id
+    // exists. Without it, collection-doc titles missed the markdownify
+    // trailing newline.
+    const docSlug = rest.slug || p.slug ||
+      (p.path || '').split('/').pop().replace(/\.[^.]+$/, '');
+    const id = url.replace(/\/$/, '').split('/').slice(0, -1).join('/') + '/' + docSlug;
     return {
       ...rest,
       // FIX (Bug 3): the scan-time `_permalink` already ran Jekyll's
       // URL placeholder substitution (document.rb #url); it wins
       // over the raw front-matter `permalink:` for `url`.
       // FIX (nav-url): strip trailing `/index` — `/docs/x/index/` → `/docs/x/`
-      url: (() => {
-        const u = _permalink || rest.permalink || `/${name}/${(_relPath || p.path).replace(/\.[^/.]+$/, '')}/`;
-        return u.replace(/\/index\/$/, '/');
-      })(),
+      url,
+      id,
       path: p.path,
+      // FIX (collection doc excerpt): real Jekyll builds an Excerpt for
+      // every document (document.rb:539-540) — front-matter `excerpt:`
+      // wins as-is; otherwise the Liquid-rendered + markdown-converted
+      // auto excerpt (_renderedExcerpt, computed by
+      // _precomputeDocumentContent), falling back to the scan-time
+      // markdown-only _excerpt. ?? (not ||): an empty rendered excerpt
+      // is a correct result and must win over the fallback.
+      excerpt: rest.excerpt ?? _renderedExcerpt ?? _excerpt ?? '',
       // FIX (collection docs had no date): real Jekyll's
       // Document#date always resolves (front matter -> filename ->
       // site.time); _date already carries that at scan time.
@@ -2368,9 +2596,10 @@ export class JekyllEngine {
     return {
       site: {
         ...this._config,
-        // FIX (site.time): Jekyll sets site.time to the build time.
+        // FIX (site.time): Jekyll sets site.time to the build time, once.
         // Config `time:` overrides (for reproducible builds).
-        time: this._config.time ? new Date(this._config.time) : new Date(),
+        // Uses this._siteTime (set once in useVFS) for singularity.
+        time: this._siteTime || (this._config.time ? new Date(this._config.time) : new Date()),
         data: this._data,
         tags: tagsMap,
         categories: categoriesMap,
@@ -2495,6 +2724,20 @@ export class JekyllEngine {
       if (name === 'posts') continue;
       for (const p of pages) {
         const { content: _c, ...pageFields } = this._mapCollectionDoc(name, p);
+        // FIX (collection doc excerpt): mirror the posts excerpt precompute
+        // above — real Jekyll Liquid-renders + markdown-converts the auto
+        // excerpt for every document (Excerpt#output, excerpt.rb:82-84).
+        if (!p.excerpt) {
+          try {
+            const rawExcerpt = extractExcerpt(p._body || '', p._excerptSeparator);
+            p._renderedExcerpt = this._renderMarkdown(
+              await this.renderTemplate(rawExcerpt, this._pageRenderContext(pageFields))
+            );
+            pageFields.excerpt = p._renderedExcerpt;
+          } catch (e) {
+            warn(p.path, e);
+          }
+        }
         try {
           p._renderedContent = await this._renderDocumentBody(p.path, p._body || '', pageFields);
         } catch (e) {
@@ -2568,19 +2811,24 @@ export class JekyllEngine {
   // FIX (layout merge chain): real Jekyll (lib/jekyll/renderer.rb
   // #render_layout) deep-merges each layout's front matter into the page
   // payload at every level -- the page wins over its layout, which wins
-  // over the parent layout -- and exposes the current layout's front
+  // over the parent layout -- and exposes the accumulated layout front
   // matter as the `layout` variable:
-  //   payload = Utils.deep_merge_hashes(payload, {
-  //     "content" => output, "page" => layout.data.merge(payload["page"]),
-  //     "layout"  => layout.data })
+  //   payload["layout"] = Utils.deep_merge_hashes(layout.data, payload["layout"] || {})
+  // The payload starts at nil and each level merges its own data UNDER the
+  // accumulated inner data, so the INNER layout wins over the outer one.
+  // Chirpy's default.html depends on this: `{% if layout.layout ==
+  // 'default' %}` must see page.html's `layout: default` front matter, not
+  // default.html's own `layout: compress`.
   // Before this fix, `{{ layout.css }}` rendered empty (no `layout` var),
   // layout front matter never reached `page.*`, and only the top layout's
   // chain link was honoured.
   async _applyLayouts(html, layoutName, ctx) {
     let page = ctx.page;
+    let layoutData = null;
     for (const { data, body } of this._layoutChain(layoutName)) {
       page = deepMerge(data, page);
-      html = await this.renderTemplate(body, { ...ctx, page, content: html, layout: data });
+      layoutData = deepMerge(data, layoutData || {});
+      html = await this.renderTemplate(body, { ...ctx, page, content: html, layout: layoutData });
     }
     return html;
   }
@@ -2685,6 +2933,18 @@ export class JekyllEngine {
         if (idx !== -1) {
           identityFields.next = idx > 0 ? sitePosts[idx - 1] : null;
           identityFields.previous = idx < sitePosts.length - 1 ? sitePosts[idx + 1] : null;
+        }
+      } else {
+        // FIX (collection doc next/previous): real Jekyll's Document#next_doc /
+        // #previous_doc work over collection.docs (date-ascending, path
+        // tie-break) for EVERY collection, not just posts (document.rb).
+        // site.collections[].docs is already in that order.
+        const coll = (siteCtx.site.collections || []).find((c) => c.label === collectionName);
+        const docs = coll ? coll.docs : [];
+        const idx = docs.findIndex((d) => d.path === postMeta.path);
+        if (idx !== -1) {
+          identityFields.next = idx < docs.length - 1 ? docs[idx + 1] : null;
+          identityFields.previous = idx > 0 ? docs[idx - 1] : null;
         }
       }
     }
@@ -2821,6 +3081,13 @@ export class JekyllEngine {
     // Pages added by plugins (not already in _rootPages).
     const rootPaths = new Set(this._rootPages.map((p) => p.path));
     const pluginPages = pluginSite.pages.filter((p) => !rootPaths.has(p.path));
+
+    // FIX (generated pages in site.pages): register generator-produced page
+    // summaries BEFORE the first _renderPage, so every template's
+    // site.pages matches real Jekyll's generator-before-render order
+    // (paginate page2..N, sitemap.xml, robots.txt, feed.xml, sass pages +
+    // sourcemaps). See _populateGeneratedPageSummaries.
+    this._populateGeneratedPageSummaries(pagination);
 
     for (const page of this._rootPages) {
       this.options.logger(`Parsing base layer: ${page.path}`, 'info');
