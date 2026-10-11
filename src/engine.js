@@ -2078,7 +2078,7 @@ export class JekyllEngine {
       // `if jekyll.environment == "production"`. Mirrors _renderPage.
       jekyll: {
         environment: this.options.environment || 'development',
-        version: '4.4.1',
+        version: '4.3.4',
       },
     };
   }
@@ -2336,7 +2336,7 @@ export class JekyllEngine {
     // next is the NEWER post, previous the OLDER one
     // (Document#next_doc/#previous_doc over the newest-first site.posts
     // array). Regular pages get none of these (all nil in real Jekyll --
-    // verified against Jekyll 4.4.1 output and document.rb/drop sources).
+    // verified against Jekyll 4.3.4 output and document.rb/drop sources).
     let identityFields = {};
     if (isPost && postMeta) {
       const collectionName =
@@ -2370,7 +2370,7 @@ export class JekyllEngine {
       // `options.environment` to the constructor to override.
       jekyll: {
         environment: this.options.environment || 'development',
-        version: '4.4.1',
+        version: '4.3.4',
       },
     };
     // FIX (pagination was entirely unimplemented): exposes `paginator`
@@ -2628,7 +2628,7 @@ export class JekyllEngine {
         },
         jekyll: {
           environment: this.options.environment || 'development',
-          version: '4.4.1',
+          version: '4.3.4',
         },
       };
       let sassSource = assetBody;
