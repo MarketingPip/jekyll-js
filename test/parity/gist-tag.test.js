@@ -9,6 +9,18 @@
 import { JekyllEngine } from '../../src/engine.js';
 
 describe('{% gist %}', () => {
+  // Mock fetch — unit tests must not hit the network.
+  // The hyde theme build (15/15 byte-identical) verifies the real network path.
+  const realFetch = global.fetch;
+  beforeEach(() => {
+    global.fetch = async () => ({
+      text: async () => '404: Not Found',
+    });
+  });
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
   test('emits script tag with file param', async () => {
     const engine = new JekyllEngine({
       vfs: { 'index.md': '---\n---\n{% gist 5555251 gist.md %}' },
