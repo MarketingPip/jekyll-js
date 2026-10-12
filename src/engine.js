@@ -1148,6 +1148,19 @@ export class JekyllEngine {
         if (chars.length <= length) return str;
         return chars.slice(0, length - [...ellipsis].length).join('') + ellipsis;
       },
+      // FIX (escape_once parity): LiquidJS's escape_once double-escapes
+      // existing entities (&#8617; → &amp;#8617;). Ruby Liquid uses a
+      // negative lookahead to preserve them:
+      //   input.gsub(/&(?!([a-zA-Z]+|#[0-9]+|#x[0-9a-fA-F]+);)/, '&amp;')
+      // (minimal-mistakes meta descriptions: footnote &#8617; backlinks)
+      escape_once: (input) => {
+        if (input == null) return '';
+        return String(input)
+          .replace(/&(?!([a-zA-Z]+|#[0-9]+|#x[0-9a-fA-F]+);)/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      },
       // FIX (#7 -- relative_url/absolute_url/strip_index missing or broken):
       relative_url: (input) => computeRelativeUrl(input, this._config),
       absolute_url: (input) => computeAbsoluteUrl(input, this._config),

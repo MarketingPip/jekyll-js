@@ -31,7 +31,7 @@ describe('kramdown-js gaps (for coordinator)', () => {
     expect(actual).toBe(rubyExpected);
   });
 
-  test.failing('gap 1b: block HTML entities verbatim (Ruby) vs escaped (kramdown-js)', () => {
+  test('gap 1b: block HTML entities verbatim [CLOSED 2026-10-11]', () => {
     // Ruby: "<blockquote><p>x</p>&mdash;</blockquote>\n"
     const rubyExpected = '<blockquote><p>x</p>&mdash;</blockquote>\n';
     const actual = kramdown('<blockquote><p>x</p>&mdash;</blockquote>\n');
@@ -39,7 +39,7 @@ describe('kramdown-js gaps (for coordinator)', () => {
     expect(actual).toBe(rubyExpected);
   });
 
-  test.failing('gap 2: no blank line in src => no \\n\\n in output', () => {
+  test('gap 2: no blank line in src => no newlines [CLOSED 2026-10-11]', () => {
     // Ruby: "a\n# h\n" (no blank) => "<p>a</p>\n<h1 id=\"h\">h</h1>\n"
     const rubyExpected = '<p>a</p>\n<h1 id="h">h</h1>\n';
     const actual = kramdown('a\n# h\n');
