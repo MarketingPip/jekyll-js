@@ -86,8 +86,12 @@ describe('kramdown-js gaps round 3 (just-the-docs 100% parity, 2026-10-11)', () 
     expect(actual).toBe('<span class="gt">&gt; My note title</span>\n');
   });
 
-  test.failing('gap 8: markdown lexer _em_ is ge', () => {
+  test('gap 8: markdown lexer _em_ is ge [CLOSED 2026-10-12]', () => {
     // rouge/lexers/markdown.rb:115: rule %r/_#{edot}*?_/, Generic::Emph
+    // Fires iff the lexer is positioned AT the `_` (not swallowed by Rouge's
+    // greedy Text rule [^\\`\\[*\\n&<]+): start of input / after newline /
+    // after a classified token. Verified against real Rouge 4.7.0 probe
+    // matrix (ff33945 gate). Mid-line `_italic_,` after a text run stays plain.
         const actual = formatRougeSpans(tokenizeMarkdown('_or_'));
     expect(actual).toBe('<span class="ge">_or_</span>');
   });

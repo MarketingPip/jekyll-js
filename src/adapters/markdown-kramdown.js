@@ -300,18 +300,16 @@ const kramdownAdapter = {
       const pm = TOC_PLACEHOLDER_RE.exec(html);
       if (pm) {
         const after = html.slice(pm.index + pm[0].length);
-        const closeMatch = after.match(/^\n(<\/[A-Za-z][^>]*>)/);
+        const closeMatch = after.match(/^\n([ \t]*<\/[A-Za-z][^>]*>)/);
         if (closeMatch) {
           // Ruby's CODE-substitution (converter/html.rb:228, 391-394): the
           // parent HTML element emits ">\n" + CODE.chomp + "\n" + indent +
           // "</tag>", then CODE is replaced by the TOC html (which ends with
-          // "\n"). Net: TOC + "\n" + indent + "</tag>". kramdown-js puts the
-          // closing tag at col 0 with no blank line; restore Ruby's bytes.
-          // indent = 2 * (parent element's nesting depth), from the tag
-          // stack at the placeholder.
-          const depth = htmlTagDepth(html, pm.index);
-          const indent = '  '.repeat(Math.max(0, depth - 1));
-          html = html.slice(0, pm.index) + tocHtml + '\n\n' + indent +
+          // "\n"). Net: TOC + "\n" + indent + "</tag>". The indent is the
+          // close tag's own leading whitespace in the rendered html
+          // (kramdown emits it at the parent element's nesting level,
+          // e.g. "  </nav>" for a nav nested in an aside).
+          html = html.slice(0, pm.index) + tocHtml + '\n\n' +
                  closeMatch[1] + after.slice(closeMatch[0].length);
         } else {
           html = html.slice(0, pm.index) + tocHtml + after;

@@ -1166,13 +1166,14 @@ export class JekyllEngine {
       absolute_url: (input) => computeAbsoluteUrl(input, this._config),
       strip_index: (input) => stripIndex(input),
       // FIX (url_encode parity): Ruby's URI.encode_www_form_component encodes
-      // '()!~ as %27/%28/%29/%21/%7E and space as +, while JS
-      // encodeURIComponent leaves '()!~ unencoded and uses %20 for space.
-      // (jekyll/welcome-to-jekyll, edge-case-very-long-title share URLs)
+      // '()!~* as %27/%28/%29/%21/%7E/%2A and space as +, while JS
+      // encodeURIComponent leaves '()!~* unencoded and uses %20 for space.
+      // (jekyll/welcome-to-jekyll, edge-case-very-long-title share URLs;
+      //  minimal-mistakes markup-title-with-markup: * must be %2A)
       url_encode: (input) =>
         encodeURIComponent(String(input ?? ''))
           .replace(/%20/g, '+')
-          .replace(/[!'()~]/g, (ch) =>
+          .replace(/[!'()*~]/g, (ch) =>
             '%' + ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')
           ),
       // FIX (#6 -- no inline `markdownify` filter existed, only the

@@ -73,3 +73,20 @@ describe('group_by_exp (Jekyll official)', () => {
     expect(result).toBe('2024,2025');
   });
 });
+
+describe('url_encode (Jekyll official)', () => {
+  // Ruby's URI.encode_www_form_component encodes * as %2A (only
+  // a-zA-Z0-9_.-~ stay unencoded... actually only a-zA-Z0-9_.- stay;
+  // ~ is encoded as %7E). JS encodeURIComponent leaves * unencoded.
+  // (minimal-mistakes markup-title-with-markup share URLs)
+  test('encodes * as %2A like Ruby', async () => {
+    const result = await renderFilter(
+      '{{ "Markup: Title *with* **Markdown**" | url_encode }}'
+    );
+    expect(result).toBe('Markup%3A+Title+%2Awith%2A+%2A%2AMarkdown%2A%2A');
+  });
+  test('encodes other reserved chars (!, (, ), ~, space)', async () => {
+    const result = await renderFilter('{{ "a!b(c)d~e f" | url_encode }}');
+    expect(result).toBe('a%21b%28c%29d%7Ee+f');
+  });
+});

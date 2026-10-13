@@ -8,20 +8,7 @@
  * This exists for Jekyll compatibility (sites using `highlighter: rouge`).
  */
 
-import { rougeHighlightInner } from '../../../kramdown-js/kramdown-rouge.js';
-
-// Language names with implemented Rouge 4.7.0 tokenizers in kramdown-rouge.js
-// (mirrors ROUGE_SUPPORTED_LANGS there; kept local to avoid touching that
-// file while another worker has it open).
-const ROUGE_LANGS = new Set([
-  'ruby', 'rb',
-  'html', 'htm', 'xhtml',
-  'liquid',
-  'js', 'javascript',
-  'css', 'scss', 'sass',
-  'yaml', 'yml',
-  'markdown', 'md',
-]);
+import { rougeHighlightInner, ROUGE_SUPPORTED_LANGS } from '../../../kramdown-js/kramdown-rouge.js';
 
 // Rouge's PlainText lexer aliases (tag 'plaintext', aliases 'text', 'plain').
 const PLAINTEXT_ALIASES = new Set(['plaintext', 'text', 'plain']);
@@ -55,7 +42,7 @@ const rougeAdapter = {
 
   supports(lang) {
     const l = normalizeLang(lang);
-    return PLAINTEXT_ALIASES.has(l) || ROUGE_LANGS.has(l);
+    return PLAINTEXT_ALIASES.has(l) || ROUGE_SUPPORTED_LANGS.has(l);
   },
 };
 
