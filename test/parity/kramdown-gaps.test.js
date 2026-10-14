@@ -124,7 +124,7 @@ describe('kramdown-js gaps round 3 (just-the-docs 100% parity, 2026-10-11)', () 
     expect(actual).toContain('&#8220;<code>:</code>');
   });
 
-  test.failing('gap 13: {::options} does not break following reference definitions', () => {
+  test('gap 13: {::options} does not break following reference definitions', () => {
     // Ruby: {::options} emits nothing and the [CHANGELOG] ref still resolves.
     const actual = kramdown(
       'see the [CHANGELOG].\n\n{::options toc_levels="2..4" /}\n\n[CHANGELOG]: /CHANGELOG/\n'

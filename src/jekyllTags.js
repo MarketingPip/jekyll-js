@@ -703,6 +703,12 @@ function registerFilterFixes(engine, opts = {}) {
   engine.registerFilter('smartify', (input) => {
     if (input == null) return '';
     return String(input)
+      // FIX (parity): Ruby's smartify runs through kramdown's SmartyPants
+      // parser, which decodes &nbsp; to U+00A0. Our regex version must do
+      // the same, otherwise xml_escape double-escapes it to &amp;nbsp;.
+      // Verified vs oracle: "Special&nbsp;---&nbsp;Characters"
+      //   -> "Special\u00A0\u2014\u00A0Characters"
+      .replace(/&nbsp;/g, '\u00A0')
       .replace(/---/g, '\u2014')
       .replace(/--/g, '\u2013')
       .replace(/\.\.\./g, '\u2026')
